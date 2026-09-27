@@ -1,0 +1,48 @@
+name: Trip's Safety + Health Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - 'tests/**'
+      - 'docs/**'
+      - '.github/workflows/trips-agent.yml'
+
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trips-safety-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  safety-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile engine
+        run: python -m compileall -q engine tests
+      - name: Verify approved executable build
+        run: PYTHONPATH=engine python -c "from build_guard import verify_build_integrity; print(verify_build_integrity()['manifest_hash'])"
+      - name: Verify approved configuration
+        run: PYTHONPATH=engine python -c "from forge_agent import load_config; print(load_config()['version'])"
+      - name: Run safety-critical tests
+        run: python tests/run_tests.py
+      - name: Validate dashboard JavaScript syntax
+        run: node --check docs/app.js
+      - name: Export read-only dashboard snapshot
+        run: PYTHONPATH=engine python engine/dashboard_export.py
+      - name: Run synthetic causal stress test
+        run: python engine/backtest.py
+      - name: Run Evolution Lab review
+        run: PYTHONPATH=engine python engine/evolution_engine.py
+
+# IMPORTANT: This workflow validates repository code/config on an ephemeral runner.
+# It is not the authoritative 24x7 live-state Guardian. The host-local health_daemon.py
+# must run beside a durable private runtime state backend before autonomous scheduled paper cycles resume.
