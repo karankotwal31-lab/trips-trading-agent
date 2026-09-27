@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "project": "Trip's",
+  "release": "0.6",
+  "supported": {
+    "execution": "paper-only",
+    "instrument_scope": "US equity cash, long-only",
+    "bar_interval": "60min",
+    "symbols": [
+      "SPY",
+      "QQQ",
+      "AAPL"
+    ],
+    "market_input": "structured OHLCV",
+    "data_truth_gate": true,
+    "cross_source_verification": true,
+    "candle_interpretation": true,
+    "risk_engine": true,
+    "guardian_self_healing": "bounded reversible operational repairs only",
+    "evolution_lab": "shadow/challenger only",
+    "supervisor_packet": true,
+    "decision_mirror": "hash-chained supervisor-visible record of substantive decisions/actions",
+    "supervisor_relay": "every mirrored decision exported to a durable outbox pending hosted transport",
+    "supervisor_counsel_gate": "advisory-only, evidence-referenced, no execution authority",
+    "relay_backpressure": "blocks new entries when unacknowledged supervisor evidence exceeds hard limit",
+    "signed_supervisor_ack": "HMAC-SHA256 receipt required before delivery cursor advances",
+    "operator_dashboard": "read-only integrity-verified control surface; no mutation or execution endpoints",
+    "dashboard_snapshot_integrity": "SHA-256 snapshot sidecar verified in the browser before rendering operational state",
+    "dashboard_server": "local-only by default with CSP/security headers and GET/HEAD-only static serving"
+  },
+  "not_supported": [
+    "live-money order submission",
+    "options/futures/FX/crypto execution",
+    "short selling",
+    "unvalidated symbols",
+    "autonomous Constitution/risk-policy mutation",
+    "autonomous strategy promotion",
+    "guaranteed profitability or loss prevention",
+    "visual screenshot-only trade authorization",
+    "exchange-grade 24x7 deployment until durable host/state is connected",
+    "direct automatic ChatGPT delivery until a durable hosted supervisor bridge is connected and acknowledged",
+    "dashboard mutation or trade-authority controls"
+  ]
+}

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Trip's — Control Center</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="portrait-layer" aria-hidden="true"></div>
+  <div class="noise-layer" aria-hidden="true"></div>
+
+  <div id="integrityLock" class="integrity-lock" hidden>
+    <div class="integrity-lock__panel">
+      <span class="eyebrow">FAIL-CLOSED DISPLAY</span>
+      <h1>Dashboard snapshot could not be verified.</h1>
+      <p id="integrityLockMessage">Operational state is hidden rather than guessed.</p>
+      <button id="retryIntegrity" class="button button--primary" type="button">Retry verification</button>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Trip's navigation">
+      <div class="sidebar__mark" aria-hidden="true"></div>
+      <nav class="nav" id="mainNav">
+        <button class="nav__item is-active" type="button" data-view="dashboard" aria-current="page"><span class="nav__icon">⌂</span><span>Dashboard</span></button>
+        <button class="nav__item" type="button" data-view="market"><span class="nav__icon">⌁</span><span>Market</span></button>
+        <button class="nav__item" type="button" data-view="strategies"><span class="nav__icon">≋</span><span>Strategies</span></button>
+        <button class="nav__item" type="button" data-view="evolution"><span class="nav__icon">△</span><span>Evolution Lab</span></button>
+        <button class="nav__item" type="button" data-view="guardian"><span class="nav__icon">◇</span><span>Guardian</span></button>
+        <button class="nav__item" type="button" data-view="diagnostics"><span class="nav__icon">✣</span><span>Diagnostics</span></button>
+        <button class="nav__item" type="button" data-view="supervisor"><span class="nav__icon">◎</span><span>Supervisor</span></button>
+        <button class="nav__item" type="button" data-view="activity"><span class="nav__icon">↯</span><span>Activity</span></button>
+        <button class="nav__item" type="button" data-view="settings"><span class="nav__icon">⚙</span><span>Settings</span></button>
+      </nav>
+      <div class="sidebar__footer">
+        <p>SAME DISCIPLINE.<br>A BRIGHTER TOMORROW.</p>
+        <span class="hairline"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="header">
+        <div>
+          <h1 class="brand">Trip's</h1>
+          <p class="brand__sub">AUTONOMOUS PAPER TRADING CONTROL CENTER</p>
+          <p class="brand__motto">DISCIPLINE&nbsp;&nbsp;/&nbsp;&nbsp;EVIDENCE&nbsp;&nbsp;/&nbsp;&nbsp;BETTER TOMORROW</p>
+        </div>
+        <div class="header__right">
+          <div class="motto">A CALMER MIND<br>TRADES FURTHER.</div>
+          <div class="clock" aria-live="polite"><span id="utcDate">—</span><span id="utcTime">— UTC</span></div>
+          <button id="refreshBtn" class="icon-button" type="button" title="Refresh verified snapshot" aria-label="Refresh verified snapshot">↻</button>
+        </div>
+      </header>
+
+      <div id="staleBanner" class="banner banner--warn" hidden></div>
+      <div id="haltBanner" class="banner banner--danger" hidden></div>
+
+      <section class="status-strip" id="statusStrip" aria-label="System status"></section>
+
+      <section class="view is-active" data-view-panel="dashboard">
+        <div class="metrics-grid" id="metricsGrid"></div>
+
+        <div class="dashboard-grid">
+          <article class="panel panel--market span-2">
+            <div class="panel__head">
+              <div>
+                <span class="eyebrow">VALIDATED CLOSED-BAR VIEW</span>
+                <h2>Market Analysis</h2>
+              </div>
+              <div class="segmented" id="symbolTabs" role="tablist" aria-label="Market symbols"></div>
+            </div>
+            <div class="market-meta" id="marketMeta"></div>
+            <div class="chart-wrap">
+              <canvas id="marketChart" width="1000" height="430" aria-label="Validated candlestick chart"></canvas>
+              <div id="chartEmpty" class="chart-empty" hidden>No verified chart series available.</div>
+            </div>
+            <div class="chart-footer">
+              <span id="chartSource">Source —</span>
+              <span>60min validated scope</span>
+              <span id="chartTruth">Trade eligibility —</span>
+            </div>
+          </article>
+
+          <div class="side-stack">
+            <article class="panel" id="guardianCard"></article>
+            <article class="panel" id="decisionCard"></article>
+          </div>
+
+          <div class="side-stack">
+            <article class="panel" id="evolutionCard"></article>
+            <article class="panel" id="riskCard"></article>
+          </div>
+
+          <article class="panel span-2" id="activityCard"></article>
+          <article class="panel" id="diagnosticsCard"></article>
+          <article class="panel" id="supervisorCard"></article>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="market">
+        <div class="page-head"><div><span class="eyebrow">OBSERVATION ONLY</span><h2>Market Truth</h2><p>Raw current-market claims are never inferred from missing data.</p></div></div>
+        <div id="marketDetailGrid" class="detail-grid"></div>
+      </section>
+
+      <section class="view" data-view-panel="strategies">
+        <div class="page-head"><div><span class="eyebrow">CHAMPION STATUS</span><h2>Strategy Evidence</h2><p>Synthetic diagnostics may reject an edge; they cannot prove one.</p></div></div>
+        <div id="strategyDetail" class="detail-grid"></div>
+      </section>
+
+      <section class="view" data-view-panel="evolution">
+        <div class="page-head"><div><span class="eyebrow">QUARANTINED RESEARCH</span><h2>Evolution Lab</h2><p>Challengers can research, never silently promote themselves.</p></div></div>
+        <div id="evolutionDetail" class="detail-grid"></div>
+      </section>
+
+      <section class="view" data-view-panel="guardian">
+        <div class="page-head"><div><span class="eyebrow">BOUNDED SELF-HEALING</span><h2>Guardian</h2><p>Operational repair is allowed only for reversible pre-approved faults.</p></div></div>
+        <div id="guardianDetail" class="detail-grid"></div>
+      </section>
+
+      <section class="view" data-view-panel="diagnostics">
+        <div class="page-head"><div><span class="eyebrow">ADVERSARIAL VERIFICATION</span><h2>Diagnostics</h2><p>Compilation, safety suite, causal stress, chaos and security checks.</p></div></div>
+        <div id="diagnosticsDetail" class="detail-grid"></div>
+      </section>
+
+      <section class="view" data-view-panel="supervisor">
+        <div class="page-head"><div><span class="eyebrow">ADVISORY ONLY</span><h2>Supervisor Relay</h2><p>Queued does not mean delivered; advice never has order authority.</p></div></div>
+        <div id="supervisorDetail" class="detail-grid"></div>
+      </section>
+
+      <section class="view" data-view-panel="activity">
+        <div class="page-head"><div><span class="eyebrow">HASH-CHAINED MIRROR</span><h2>Decision Activity</h2><p>Only whitelisted summaries are exposed here; raw evidence packets stay private.</p></div></div>
+        <article class="panel"><div id="activityTableFull"></div></article>
+      </section>
+
+      <section class="view" data-view-panel="settings">
+        <div class="page-head"><div><span class="eyebrow">READ-ONLY POLICY</span><h2>Configuration & Capability Boundaries</h2><p>This dashboard cannot mutate risk, strategy, symbols, providers or the Constitution.</p></div></div>
+        <div id="settingsDetail" class="detail-grid"></div>
+      </section>
+
+      <footer class="footer">
+        <span id="releaseLabel">TRIP'S —</span>
+        <span>READ-ONLY CONTROL SURFACE · ZERO EXECUTION AUTHORITY</span>
+        <span>DISCIPLINE COMPOUNDS EVERYTHING.</span>
+      </footer>
+    </main>
+  </div>
+  <script src="./app.js" defer></script>
+</body>
+</html>

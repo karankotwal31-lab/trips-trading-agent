@@ -1,0 +1,88 @@
+{
+  "project_name": "Trip's",
+  "version": "0.6",
+  "mode": "paper",
+  "provider": "demo",
+  "secondary_provider": null,
+  "provider_source_kind": "demo",
+  "secondary_source_kind": null,
+  "symbols": [
+    "SPY",
+    "QQQ",
+    "AAPL"
+  ],
+  "initial_equity": 100000.0,
+  "bar_interval": "60min",
+  "truth": {
+    "require_independent_source_for_trade": true,
+    "max_timestamp_skew_minutes": 5,
+    "min_cross_source_bars": 3,
+    "allow_synthetic_analysis": true,
+    "bar_close_lag_seconds": 20,
+    "max_ohlc_deviation_pct": 0.005
+  },
+  "risk": {
+    "max_risk_per_trade_pct": 0.005,
+    "max_daily_loss_pct": 0.015,
+    "max_total_exposure_pct": 0.3,
+    "max_open_positions": 3,
+    "min_signal_score": 0.72,
+    "max_data_age_minutes": 120,
+    "cooldown_after_losses": 3,
+    "cooldown_cycles": 6,
+    "max_assumed_spread_bps": 20,
+    "assumed_spread_bps": 10,
+    "assumed_slippage_bps": 5,
+    "risk_day_timezone": "America/New_York"
+  },
+  "trade": {
+    "atr_stop_multiple": 1.5,
+    "target_r_multiple": 2.0,
+    "break_even_after_r": 1.0,
+    "trail_after_r": 1.5,
+    "trail_atr_multiple": 1.0,
+    "pending_entry_max_bars": 1
+  },
+  "forge": {
+    "require_history_bars": 60,
+    "require_strategy_agreement": 1,
+    "reject_bearish_candle_context_for_long": true,
+    "escalate_on_conflict": true,
+    "escalate_on_data_anomaly": true,
+    "escalate_on_drawdown_pct": 0.02,
+    "halt_on_drawdown_pct": 0.05
+  },
+  "instrument_scope": "US_EQUITY_CASH_LONG_ONLY",
+  "health": {
+    "heartbeat_minutes": 5,
+    "stale_temp_minutes": 60,
+    "disk_free_min_mb": 512,
+    "safe_auto_repair": true,
+    "daily_deep_diagnostics": true,
+    "hourly_light_diagnostics": true
+  },
+  "evolution": {
+    "enabled": true,
+    "shadow_only": true,
+    "auto_apply_code_changes": false,
+    "auto_apply_risk_changes": false,
+    "auto_apply_constitution_changes": false,
+    "require_out_of_sample": true,
+    "require_human_approval": true,
+    "min_candidate_trades": 100,
+    "min_walk_forward_windows": 5
+  },
+  "supervisor": {
+    "daily_packet": true,
+    "report_timezone": "Asia/Kolkata",
+    "report_local_time": "19:00",
+    "critical_escalation_immediate": true,
+    "relay_every_decision": true,
+    "transport_mode": "local_outbox_until_hosted_bridge",
+    "max_undelivered_events": 500,
+    "halt_new_entries_on_relay_backlog": true,
+    "supervisor_advice_is_advisory_only": true,
+    "require_external_verification_for_current_market_claims": true,
+    "require_signed_ack": true
+  }
+}

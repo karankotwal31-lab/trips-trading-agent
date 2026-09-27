@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "authority": "RESEARCH_ONLY",
+  "learn_from": [
+    "paper_trades",
+    "rejected_setups",
+    "no_trade_decisions",
+    "escalations",
+    "replay_results"
+  ],
+  "pre_trade_recall": {
+    "enabled": true,
+    "max_similar_episodes": 5
+  },
+  "post_trade_autopsy": {
+    "enabled": true
+  },
+  "teacher_mode": {
+    "enabled": true,
+    "curriculum_is_hypothesis_only": true
+  },
+  "examiner": {
+    "min_episodes": 100,
+    "require_oos": true,
+    "min_walk_forward_windows": 5
+  },
+  "evolution_handoff": {
+    "shadow_only": true,
+    "require_human_approval": true
+  },
+  "forbidden": [
+    "execution_authority",
+    "risk_mutation",
+    "constitution_mutation",
+    "provider_authorization",
+    "symbol_authorization",
+    "champion_promotion",
+    "supervisor_acknowledgement"
+  ]
+}

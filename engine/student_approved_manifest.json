@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "release": "0.8-student-integrated-hard-tested",
+  "authority": "RESEARCH_ONLY",
+  "files": {
+    "engine/student_engine.py": "200c3ce2596ef5430aa6fd4fa85f3f82e0e398c4d28d52b682751c3011ffabe0",
+    "engine/student_orchestrator.py": "8a68e5639379c48398b62336fff953c93519f4cd0bcf631e049ee7bb67a3af36",
+    "engine/student_config.json": "1f0f73bc33fffd97dca4c4f720f6a337473324bb2c2b8553d6a8f601ae78733e",
+    "infra/neon_schema_student_v08.sql": "f495748c98ab12f4340bdc4eedb7b27dccdcbba2ac54b40b9059e12f7500f4c6",
+    "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
+    "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3"
+  },
+  "manifest_hash": "769b4769e579fd0725dcc5a61337d523056fb82cfbd910f1766d0ea3b4be812b"
+}
