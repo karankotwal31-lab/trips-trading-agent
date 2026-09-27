@@ -1,0 +1,31 @@
+name: Trips Daily Deep Diagnostics
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "31 12 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  deep-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify frozen v0.6 core
+        run: |
+          set -euo pipefail
+          sha256sum -c infra/core_v06.sha256
+      - name: Core safety suite
+        run: python tests/run_tests.py
+      - name: Cloud-shell safety suite
+        run: python infra/tests/test_cloud_shell.py
+      - name: Deep diagnostics
+        run: PYTHONPATH=engine python engine/diagnostics_engine.py
+      - name: Chaos diagnostics
+        run: PYTHONPATH=engine python engine/chaos_diagnostics.py
