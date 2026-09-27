@@ -1,0 +1,20 @@
+name: Live Execution Foundation Verification
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify frozen v0.6 core
+        run: sha256sum -c infra/core_v06.sha256
+      - name: Verify approved v0.7 infrastructure
+        run: python infra/verify_infra.py
+      - name: Test live execution fail-closed gates
+        run: python -m unittest discover -s live_execution/tests -v
