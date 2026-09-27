@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "project": "Trip's",
+  "release": "0.6",
+  "release_verdict": "HARDENED_PAPER_ONLY_CONTROL_CENTER",
+  "approved_build_hash": "d67a692a877a02c0a1211f98e554b37cd52bb48c65a1e03b85952aef5a244ee0",
+  "approved_config_hash": "270fbb5f556506e99b299821132f3645164d8b9515ab41bf73274f75a80aaa15",
+  "dashboard_snapshot_sha256": "ea9fb52b492090e5af5a6ae1ea27a51aeecadc4d75b0acaf38ae392ded63a63a",
+  "safety_tests": {
+    "passed": 92,
+    "total": 92
+  },
+  "compile_passed": true,
+  "javascript_syntax_passed": true,
+  "deep_diagnostics_passed": true,
+  "deep_action": "CONTINUE_PAPER_OBSERVATION",
+  "chaos": {
+    "schema_version": 1,
+    "seed": 404,
+    "position_size_cases": 20000,
+    "invalid_position_sizes": 0,
+    "malformed_ohlcv_cases": 1000,
+    "malformed_trade_eligible_accepts": 0,
+    "validator_crashes": 0,
+    "supervisor_counsel_adversarial_cases": 1000,
+    "unsafe_supervisor_counsel_accepts": 0,
+    "supervisor_counsel_crashes": 0,
+    "passed": true
+  },
+  "security": {
+    "schema_version": 1,
+    "files_scanned": 41,
+    "secret_findings": [],
+    "passed": true,
+    "provider_credentials_present": {
+      "ALPHA_VANTAGE_API_KEY": false,
+      "TWELVE_DATA_API_KEY": false
+    },
+    "note": "Credential presence is reported as boolean only; values are never emitted."
+  },
+  "dashboard_security": {
+    "strict_csp": true,
+    "external_frontend_dependencies": 0,
+    "browser_snapshot_sha256_verification": true,
+    "read_only_methods": true,
+    "post_put_delete_status": 405,
+    "directory_listing_status": 403,
+    "path_traversal_blocked": true,
+    "operator_surface_build_locked": true,
+    "stale_snapshot_labelling": true,
+    "integrity_failure_banner": true
+  },
+  "strategy_evidence": {
+    "notice": "Synthetic robustness test only; never evidence of live-market profitability.",
+    "all_causal": true,
+    "all_small_sample": true,
+    "worst_net_pnl": -5347.066800326979,
+    "best_net_pnl": 163.96849285713893,
+    "worst_drawdown_pct": 0.05384994525126996
+  },
+  "strategy_verdict": "UNPROVEN",
+  "live_execution_present": false,
+  "remaining_external_blockers": [
+    "durable private 24x7 host/state",
+    "verified independent current-market feeds",
+    "real multi-regime walk-forward evidence",
+    "formal exchange calendar/session engine",
+    "authenticated hosted supervisor bridge"
+  ]
+}

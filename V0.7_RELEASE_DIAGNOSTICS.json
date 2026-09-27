@@ -1,0 +1,50 @@
+{
+  "project": "Trip's",
+  "release": "v0.7-neon-cloud-paper-shell",
+  "generated_at": "2026-09-22T13:50:00Z",
+  "core": {
+    "version": "v0.6-frozen",
+    "approved_build_manifest_hash": "d67a692a877a02c0a1211f98e554b37cd52bb48c65a1e03b85952aef5a244ee0",
+    "architecture_changed": false
+  },
+  "cloud_shell": {
+    "version": "v0.7",
+    "approved_infra_manifest_hash": "1c673d0e2f04d3dcd7375f7736de98d9d81c5b41e6e373fb327dc401bdc5d059"
+  },
+  "verification": {
+    "core_tests_passed": 92,
+    "cloud_shell_tests_passed": 16,
+    "total_targeted_tests_passed": 108,
+    "frozen_core_checksum_contract_passed": true,
+    "dashboard_raw_to_canonical_hash_regression_test": true
+  },
+  "neon": {
+    "project": "Trips Trading Agent",
+    "database": "trips",
+    "schema": "trips_cloud",
+    "production_tables": 4,
+    "runtime_initialized": true,
+    "runtime_version": 1,
+    "runtime_sha256": "be71acbd0c101daa91218d9fa8e1bd9966bd01d62020d5c1fdca7544985d6d2b",
+    "activation_heartbeat": "PASS",
+    "dashboard_snapshot_present": true,
+    "runtime_credential_ready": true,
+    "dashboard_credential_ready": false,
+    "production_branch_protected": false,
+    "branch_protection_blocker": "free-plan protected-branch allowance"
+  },
+  "activation_status": {
+    "dedicated_trading_repo_available": false,
+    "provider_config": "DEMO_UNCHANGED",
+    "scheduled_market_cycles_active": false,
+    "live_money_execution": false,
+    "daily_review_reads_neon": true,
+    "vercel_dashboard_deployed": false
+  },
+  "blockers": [
+    "Dedicated private GitHub trading repository is not available to the connector.",
+    "The connected GitHub tool cannot write repository secrets such as NEON_DATABASE_URL.",
+    "Real market-data credentials are not configured; reviewed provider/config approval is still required.",
+    "Vercel deploy action was unavailable at runtime; no dashboard deployment is claimed."
+  ]
+}
