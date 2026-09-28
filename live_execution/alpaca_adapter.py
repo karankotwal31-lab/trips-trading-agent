@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json, os, urllib.error, urllib.request
 from .broker import BrokerError
+from .gates import require_live_opt_in
 
 class AlpacaBroker:
     """Minimal Alpaca Trading API adapter.
@@ -30,6 +31,8 @@ class AlpacaBroker:
     def positions(self): return self._request("GET","/v2/positions")
     def orders(self): return self._request("GET","/v2/orders?status=all&limit=500")
     def submit_order(self,intent):
+        if self.base == "https://api.alpaca.markets":
+            require_live_opt_in()
         payload={"symbol":intent["symbol"],"qty":str(intent["qty"]),"side":intent["side"].lower(),
                  "type":intent.get("type","market"),"time_in_force":intent.get("time_in_force","day"),
                  "client_order_id":intent["idempotency_key"]}
