@@ -18,7 +18,7 @@ class UpstoxBroker:
         self.token=os.getenv("UPSTOX_ACCESS_TOKEN","")
         if not self.token:
             raise BrokerError("Upstox access token missing")
-        self.base="https://api-hft.upstox.com"
+        self.base="https://api-sandbox.upstox.com/v3" if env=="sandbox" else "https://api-hft.upstox.com"
 
     def _request(self,method,path,body=None):
         data=None if body is None else json.dumps(body,separators=(",",":")).encode()
@@ -60,9 +60,9 @@ class UpstoxBroker:
             "trigger_price":float(intent.get("trigger_price",0)),
             "is_amo":False,
             "slice":False,
-            "market_protection":intent.get("market_protection",0),
+            "market_protection":intent.get("market_protection",-1),
         }
-        r=self._request("POST","/v3/order/place",payload)
+        order_path="/order/place" if self.env=="sandbox" else "/v3/order/place"\n        r=self._request("POST",order_path,payload)
         data=r.get("data",{}) if isinstance(r,dict) else {}
         oid=data.get("order_id")
         if not oid: raise BrokerError("broker did not return an order id")
@@ -72,5 +72,5 @@ class UpstoxBroker:
 
     def cancel_order(self,broker_order_id):
         q=urllib.parse.quote(str(broker_order_id),safe="")
-        self._request("DELETE",f"/v3/order/cancel?order_id={q}")
+        cancel_path=f"/order/cancel?order_id={q}" if self.env=="sandbox" else f"/v3/order/cancel?order_id={q}"\n        self._request("DELETE",cancel_path)
         return {"broker_order_id":broker_order_id,"cancel_requested":True}
