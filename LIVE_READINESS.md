@@ -3,11 +3,11 @@
 Live execution is **not ready** merely because an API key exists. Activation requires every machine-checkable gate in `live_execution/readiness.py` to pass on the exact reviewed commit.
 
 ## External dependencies still required
-1. A specific supported broker/account must be selected.
-2. The account must legally/operationally permit the intended US-equity cash trading.
+1. Upstox is the selected broker adapter; the account/app must be provisioned before broker-authenticated checks can pass.
+2. The account/app must legally and operationally permit the intended Indian-market API trading and comply with applicable exchange/broker controls.
 3. Broker API credentials must be stored only in the deployment secret store, never committed.
-4. Broker-specific order, cancel, fill, position and account semantics must be implemented and tested against that broker's sandbox/test environment before any production endpoint is enabled.
-5. Production account identity/permissions and market-data entitlement must be verified.
+4. Upstox order/cancel semantics must pass the Upstox sandbox; authenticated account, position, fill and reconciliation semantics must be verified before any production endpoint is enabled.
+5. Production account identity/permissions, market-data entitlement, and required registered static outbound IP must be verified.
 6. An operator must explicitly enable live mode.
 
 ## Failure policy
