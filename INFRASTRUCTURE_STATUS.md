@@ -1,5 +1,9 @@
 # Trip's Infrastructure Status — v0.7 Neon Cloud Shell
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 ## Frozen core
 
 Trip's v0.6 trading/safety core remains unchanged. `infra/core_v06.sha256` verifies the frozen core byte-for-byte. Cloud orchestration is outside the core and cannot silently alter strategy, risk, Constitution or execution logic.
@@ -72,4 +76,4 @@ paper stage, no paper endpoint and no paper credential, and no runtime fallback 
 environments. The `Trips Cloud Paper Cycle` workflow is retired; its non-trading health checks
 moved to `Trips Live Readiness`, which is non-mutating by construction.
 
-No live-money broker path is pending or enabled. This build holds at `LIVE_READY_LOCKED`.
+A live-money-only broker execution path exists in code, but **live transmission is not enabled**. The current build remains locked under D1 and holds at `LIVE_READY_LOCKED`.
