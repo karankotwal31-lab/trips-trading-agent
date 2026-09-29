@@ -13,9 +13,10 @@ somebody makes in a hurry:
 1. ``live_release_requirements()`` states, from the frozen core itself, exactly which frozen facts
    currently forbid release and exactly which artifacts would have to be re-approved.
 2. ``AmendmentProposal`` is an owner-**signed**, versioned, expiring description of the intended
-   rule change and target mode. The signature is an HMAC-SHA256 tag over the proposal's canonical
-   payload, produced with the owner key held outside this repository. There is no ``owner_signed``
-   boolean: a boolean is settable by any caller and would make this whole mechanism forgeable.
+   rule change and target mode. The signature is an Ed25519 (RFC 8032) signature over the
+   proposal's canonical payload, domain-separated by purpose, produced with the owner key held
+   outside this repository. There is no ``owner_signed`` boolean: a boolean is settable by any
+   caller and would make this whole mechanism forgeable.
 3. ``verify_amendment()`` proves the gate OPENS by running the **production**
    ``FrozenLiveBoundary`` over the amended rule set and mode. It enforces a strict-superset
    invariant: the amendment may remove only the prohibition and add only the authorizing rule.
@@ -112,8 +113,9 @@ class AmendmentProposal:
     """An owner-SIGNED description of the intended constitutional change.
 
     There is deliberately no ``owner_signed`` boolean. Authority is the ``signature`` field: an
-    HMAC-SHA256 tag over ``signed_payload()`` produced with the owner key. A boolean can be set by
-    any caller, so it would make the whole amendment mechanism forgeable.
+    Ed25519 (RFC 8032) signature over ``signed_payload()``, produced with the owner key held
+    outside this repository. A boolean can be set by any caller, so it would make the whole
+    amendment mechanism forgeable.
     """
 
     amendment_id: str
