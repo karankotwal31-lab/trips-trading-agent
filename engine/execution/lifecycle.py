@@ -277,7 +277,8 @@ class Lifecycle:
     def __init__(self, stage: Stage = DEFAULT_STAGE, boundary: Optional[FrozenLiveBoundary] = None,
                  release_basis: Optional[CoreStateBasis] = None,
                  authorization: Optional[LiveAuthorization] = None,
-                 live_verification: Optional[Mapping[str, Any]] = None) -> None:
+                 live_verification: Optional[Mapping[str, Any]] = None,
+                 market_data_verification: Optional[Any] = None) -> None:
         self._stage = Stage(stage)
         self._boundary = boundary or FrozenLiveBoundary()
         if release_basis is not None and release_basis.source not in CORE_STATE_SOURCES:
@@ -298,6 +299,9 @@ class Lifecycle:
         # Keep the complete typed verification envelope. Bare record maps discard the broker,
         # account and environment binding and can never authorize LIVE_ENABLED.
         self._live_verification = live_verification
+        # Independent market-data Truth evidence is deliberately separate from broker/account
+        # verification. A healthy broker feed never becomes Strategy/Truth authority by convenience.
+        self._market_data_verification = market_data_verification
 
     @property
     def authorization(self) -> Optional[LiveAuthorization]:
@@ -375,6 +379,7 @@ class Lifecycle:
                 "every check executes the subsystem it names and reports a digest over the "
                 "observation; module presence is not engineering completion"),
             "live_read_only_broker_verification": self.live_verification_status(),
+            "production_market_data_verification": self.market_data_verification_status(),
             "conformance_evidence": {
                 broker_id: {
                     "digest": document.digest(),
@@ -530,17 +535,6 @@ class Lifecycle:
                     f"live broker verification did not prove all required instruments: "
                     f"{sorted(required - available)}")
 
-            entitlement_record = records.get("verify_live_market_data_entitlement")
-            entitlement_obs = dict(getattr(entitlement_record, "observation", {}) or {})
-            entitlement_symbols = {str(s).upper()
-                                   for s in entitlement_obs.get("symbols", ())}
-            if entitlement_obs.get("entitled") is not True:
-                binding_reasons.append("live market-data entitlement was not proven")
-            if not required.issubset(entitlement_symbols):
-                binding_reasons.append(
-                    f"live market-data entitlement does not cover: "
-                    f"{sorted(required - entitlement_symbols)}")
-
             authorization_bound = not binding_reasons
 
         activation_verified = bool(evidence_verified and authorization_bound)
@@ -559,9 +553,9 @@ class Lifecycle:
             "submits_no_order": True,
             "releases_capital": False,
             "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
-            "note": ("Twelve non-mutating checks against the intended real live account. "
-                     "Activation additionally requires exact broker/account binding to the owner "
-                     "authorization; recorded fixtures and bare record maps cannot satisfy it."),
+            "note": ("Eleven non-mutating broker/account checks against the intended real live "
+                     "account. Market-data Truth evidence is verified independently and cannot be "
+                     "satisfied by a broker execution feed."),
         }
 
     def advance(self, to: Stage, *, actor: Actor, authorization: Optional[LiveAuthorization] = None,
