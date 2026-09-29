@@ -735,6 +735,180 @@ def test_the_readiness_report_is_honest_and_releases_nothing():
                                     "LIVE_READY_LOCKED", "LIVE_ENABLED"]
 
 
+
+def _activation_artifacts(now):
+    """Synthetic owner/live evidence used only to prove the activation boundary."""
+    from dataclasses import replace
+
+    import test_execution_layer as base
+    from execution.identity import current_identity
+    from execution.lifecycle import LiveAuthorization
+
+    config = base.approved_config()
+    governor_hash = base.fingerprint_profile(base.TEST_PROFILE)
+    identity = current_identity(config=config, governor_profile_hash=governor_hash)
+    unsigned = LiveAuthorization(
+        strategy_build_id=identity["build_hash"],
+        config_id=identity["config_hash"],
+        risk_profile_id=identity["risk_profile_hash"],
+        governor_profile_id=identity["governor_profile_hash"],
+        broker_id="alpaca",
+        account_id="ACCT-LIVE",
+        environment="live",
+        issued_at=(now - timedelta(minutes=1)).isoformat(),
+        expires_at=(now + timedelta(hours=1)).isoformat(),
+    )
+    signed = replace(
+        unsigned,
+        signature=base.sign_for_tests(PURPOSE_LIVE_AUTHORIZATION, unsigned.signed_payload()),
+    )
+    return signed, config, governor_hash
+
+
+def _full_live_verification(now, *, broker_id="alpaca", account_id="ACCT-LIVE",
+                            minutes_old=0, missing_check=None,
+                            entitlement_symbols=("SPY", "QQQ", "AAPL")):
+    from execution.live_verification import (LiveReadOnlyVerification, ReadOnlyCheckRecord,
+                                             REQUIRED_INSTRUMENTS)
+
+    observed_at = now - timedelta(minutes=minutes_old)
+    records = {}
+    for name in READ_ONLY_CHECKS:
+        if name == missing_check:
+            continue
+        observation = {"probe": name}
+        if name == "verify_broker_identity":
+            observation = {"broker_id": broker_id, "environment": "live", "venue": "US"}
+        elif name == "verify_exact_account":
+            observation = {"account_id": account_id, "matches_expected": True}
+        elif name == "verify_required_instruments_available":
+            observation = {"available": list(REQUIRED_INSTRUMENTS),
+                           "required": list(REQUIRED_INSTRUMENTS)}
+        elif name == "verify_live_market_data_entitlement":
+            observation = {"entitled": True, "source": "synthetic-live-test",
+                           "symbols": list(entitlement_symbols)}
+        records[name] = ReadOnlyCheckRecord(
+            check=name, passed=True, detail="synthetic live-read-only activation fixture",
+            observation=observation, verified_at=observed_at.isoformat())
+    return LiveReadOnlyVerification(
+        broker_id=broker_id, account_id=account_id, environment="live",
+        generated_at=observed_at.isoformat(), records=records)
+
+
+def test_live_enable_refuses_when_real_account_verification_is_missing():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    lifecycle = Lifecycle(Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary())
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=governor_hash)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_LIVE_VERIFICATION"
+
+
+def test_bare_record_maps_cannot_masquerade_as_bound_live_verification():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    complete = _full_live_verification(now)
+    lifecycle = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=complete.records)
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=governor_hash)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_LIVE_VERIFICATION"
+    assert "typed broker/account" in result["reason"]
+
+
+def test_live_verification_is_fresh_and_bound_to_broker_account_and_symbols():
+    now = datetime.now(timezone.utc)
+    authorization, _, _ = _activation_artifacts(now)
+
+    good = Lifecycle(
+        Stage.LIVE_READY_LOCKED, live_verification=_full_live_verification(now))
+    status = good.live_verification_status(authorization=authorization, now=now)
+    assert status["verified"] is True
+    assert status["authorization_bound"] is True
+    assert status["activation_verified"] is True
+
+    stale = Lifecycle(
+        Stage.LIVE_READY_LOCKED,
+        live_verification=_full_live_verification(now, minutes_old=16))
+    assert stale.live_verification_status(
+        authorization=authorization, now=now)["activation_verified"] is False
+
+    wrong_account = Lifecycle(
+        Stage.LIVE_READY_LOCKED,
+        live_verification=_full_live_verification(now, account_id="SOMEONE-ELSE"))
+    assert wrong_account.live_verification_status(
+        authorization=authorization, now=now)["activation_verified"] is False
+
+    incomplete_entitlement = Lifecycle(
+        Stage.LIVE_READY_LOCKED,
+        live_verification=_full_live_verification(
+            now, entitlement_symbols=("SPY", "QQQ")))
+    result = incomplete_entitlement.live_verification_status(
+        authorization=authorization, now=now)
+    assert result["activation_verified"] is False
+    assert any("AAPL" in reason for reason in result["reasons"])
+
+
+def test_live_enable_requires_identity_evidence_and_then_allows_only_full_agreement():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    verification = _full_live_verification(now)
+
+    missing = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=verification)
+    with base.owner_key_configured():
+        result = missing.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=None, governor_profile_hash=governor_hash)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_IDENTITY_EVIDENCE_MISSING"
+
+    lifecycle = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=verification)
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=governor_hash)
+    assert result["advanced"] is True
+    assert lifecycle.stage is Stage.LIVE_ENABLED
+    assert lifecycle.authorization is not None
+    assert lifecycle.authorization.content_hash() == authorization.content_hash()
+
+
+def test_live_enable_refuses_identity_drift_even_when_every_other_fixture_agrees():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    verification = _full_live_verification(now)
+    lifecycle = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=verification)
+    changed_governor = "f" * 64
+    assert changed_governor != governor_hash
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=changed_governor)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_AUTHORIZATION_DRIFT"
+
+
 def test_autonomy_may_only_tighten_the_owner_signed_governor_profile():
     """After activation, valid decisions execute without per-order approval - inside the limits."""
     from execution.live_path import assert_no_autonomous_authority_increase
