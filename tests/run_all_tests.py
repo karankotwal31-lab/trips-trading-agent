@@ -30,6 +30,7 @@ SUITES = (
     ("execution-layer", [sys.executable, "tests/test_execution_layer.py"], {}),
     ("task-safety-kernel", [sys.executable, "tests/test_task_safety_kernel.py"], {}),
     ("commodity-readiness", [sys.executable, "tests/test_commodity_readiness.py"], {}),
+    ("mock-2000-60cycle-torture", [sys.executable, "tests/test_mock_2000_60cycle_torture.py"], {}),
     ("live-gate-amendment", [sys.executable, "tests/test_live_gate_amendment.py"], {}),
     ("live-readiness", [sys.executable, "tests/test_live_readiness.py"], {}),
     ("execution-evidence", [sys.executable, "tests/test_execution_evidence.py"], {}),
