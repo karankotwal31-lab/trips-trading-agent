@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Trip's research shadow cycle daily
+
+[Timer]
+OnCalendar=*-*-* 23:45:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+Unit=trips-shadow.service
+
+[Install]
+WantedBy=timers.target
