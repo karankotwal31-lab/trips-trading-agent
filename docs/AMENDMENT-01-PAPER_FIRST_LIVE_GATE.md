@@ -1,6 +1,11 @@
 # Amendment 01 — `PAPER_FIRST` → `LIVE_GATE`
 
-**Status: DRAFT — NOT IN FORCE. NOT IMPLEMENTED. NO CODE, CONFIG, MANIFEST OR FINGERPRINT HAS BEEN CHANGED.**
+**Status: REVIEWED — NOT APPROVED AS WRITTEN. NOT IN FORCE. No frozen file, configuration value, fingerprint or manifest has been changed.**
+
+**Review verdict: `AMEND` (see §20).** The amendment's own enforcement mechanism — the owner
+signature of §7 — was found to be forgeable by any caller. That defect has been found, fixed and
+regression-tested in the execution layer. Approval is now blocked on the prerequisites in §20.3,
+not on the text of §3.
 
 | Field | Value |
 |---|---|
@@ -10,6 +15,8 @@
 | Affects frozen core | **Yes — 4 frozen files + 3 locked fingerprints** |
 | Authority to enact | Owner only. No autonomous component may apply, schedule, or prepare-execute this amendment. |
 | Baseline at time of drafting | 125/125 tests PASS; frozen core 16/16 OK; `live_execution_present: false` |
+| Baseline at review | **240/240 tests PASS** across 7 suites; frozen core 16/16 OK; infra manifest `1c673d0e…d059` |
+| Review verdict | **`AMEND` — not approvable as written** (see §20) |
 | Decision required from owner | Approve / Reject / Amend (see §18) |
 
 ---
@@ -90,17 +97,28 @@ Rules 36–42 are **additions**. None of the existing 35 rules (1–34 plus the 
 
 Rules that this amendment **explicitly does not** touch, and that no later autonomous process may amend:
 
-- `TRUTH_OVER_ACTION`, `FAIL_CLOSED`, `EVIDENCE_BEFORE_INFERENCE`, `NO_FAKE_CERTAINTY`
-- `RISK_BEFORE_RETURN`, `NO_MARTINGALE`
-- `CLOSED_BARS_ONLY`, `CAUSAL_EXECUTION`
-- `INSTRUMENT_SCOPE_LOCK`, `VALIDATED_SYMBOL_SCOPE`
-- `STATE_INTEGRITY`, `ATOMIC_STATE_COMMIT`, `RECOVERY_WITHOUT_ROLLBACK`
-- `EXECUTABLE_BUILD_LOCK`, `NO_SILENT_MODEL_DRIFT`, `NO_AUTONOMOUS_POLICY_MUTATION`
-- `EVOLUTION_IN_QUARANTINE`, `SELF_HEALING_BOUNDARY`
-- `SUPERVISOR_ADVISORY_ONLY`, `RELAY_BACKPRESSURE`, `AUTHENTICATED_SUPERVISOR_ACK`
-- `HEALTH_BEFORE_TRADING`, `DURABLE_ESCALATION`, `DECISION_MIRROR`
-- `OPERATOR_SURFACE_TRUTH`
+The floor is **all 34 surviving rules**, in Constitution order. An earlier draft of this document
+listed only 25 of them; the nine marked in **bold** were missing, which would have left them
+outside the floor and readable as un-frozen:
+
+- 1–4: `TRUTH_OVER_ACTION`, `FAIL_CLOSED`, `EVIDENCE_BEFORE_INFERENCE`, `NO_FAKE_CERTAINTY`
+- 5–6: `RISK_BEFORE_RETURN`, `NO_MARTINGALE`
+- 7–10: **`INDEPENDENT_VERIFICATION`**, **`CONSERVATIVE_SIMULATION`**, **`AUDIT_EVERYTHING`**, **`SEPARATE_ANALYSIS_FROM_EXECUTION`**
+- 11: `NO_SILENT_MODEL_DRIFT`
+- 12: **`ESCALATE_UNKNOWN_UNKNOWNS`**
+- 14–16: `CLOSED_BARS_ONLY`, `CAUSAL_EXECUTION`, `STATE_INTEGRITY`
+- 17: **`RISK_DATA_SEPARATION`**
+- 18–26: `INSTRUMENT_SCOPE_LOCK`, `ATOMIC_STATE_COMMIT`, `EXECUTABLE_BUILD_LOCK`, `DURABLE_ESCALATION`, `VALIDATED_SYMBOL_SCOPE`, `HEALTH_BEFORE_TRADING`, `SELF_HEALING_BOUNDARY`, `NO_AUTONOMOUS_POLICY_MUTATION`, `EVOLUTION_IN_QUARANTINE`
+- 27: **`SUPERVISOR_EVIDENCE_PACKET`**
+- 28–29: `RECOVERY_WITHOUT_ROLLBACK`, `DECISION_MIRROR`
+- 30: **`FACT_INFERENCE_SEPARATION`**
+- 31–32: `SUPERVISOR_ADVISORY_ONLY`, **`SUPERVISOR_EXTERNAL_VERIFICATION`**
+- 33–35: `RELAY_BACKPRESSURE`, `AUTHENTICATED_SUPERVISOR_ACK`, `OPERATOR_SURFACE_TRUTH`
 - plus new rules 36–42 above.
+
+Rule 13 `PAPER_FIRST` is the **only** rule this amendment touches. That is now an exact,
+machine-checkable statement rather than prose: `verify_amendment()` refuses any proposal that
+removes a rule other than the prohibition, or adds a rule other than the authorizing rule.
 
 Standing interpretation added by this amendment:
 
@@ -140,6 +158,14 @@ A new versioned, hash-pinned record — proposed `engine/live_authorization.json
 approved strategy/build identity · approved config identity · approved risk profile · approved Capital Governor profile · broker adapter identity · brokerage account identity · environment · issuance timestamp · expiry · owner signature.
 
 Any material change to strategy code, Risk rules, Capital Governor rules, Truth rules, symbol scope or execution semantics **invalidates the artifact**, returning the runtime to `LIVE_LOCKED` until verification completes again. This is the mechanism that makes §8 of the source specification ("immutable approved identity") enforceable rather than aspirational.
+
+**Required enforcement — added at review, see §20.1.** "Owner-signed" must be a cryptographic
+fact, not a boolean. Implemented in `engine/execution/owner_authority.py`: an HMAC-SHA256 tag over
+the artifact's canonical payload, verified against a key that exists only outside this repository
+(`TRIPS_OWNER_AUTHORITY_KEY`, or `TRIPS_OWNER_AUTHORITY_KEY_FILE`). With no usable key, every owner
+act fails closed as `OWNER_AUTHORITY_KEY_NOT_CONFIGURED`. Independently, a release basis is refused
+unless it is accompanied by a **valid signed** authorization, so owner decision A cannot imply
+owner decision B.
 
 ---
 
@@ -224,7 +250,8 @@ These must change together, in this order, in a single reviewed change. A partia
 | 3 | `engine/risk.py` | `e2158ce4…2036` (frozen) | `paper_mode` check → mode-aware check with strict-superset semantics |
 | 4 | `engine/config.json` | `270fbb5f…aa15` + build-hashed | Add `live` block; `mode` semantics |
 | 5 | `engine/capability_registry.json` | build-hashed | `execution` value; `not_supported` revision |
-| 6 | **New** execution modules | — | Gateway, adapters, transports, intent, Gate, canonical states, idempotency, reconciliation, Capital Governor, lifecycle, AI Supervisor, live authorization |
+| 6 | **New** execution modules | **built; not frozen** | Gateway, adapters, transports, intent, Gate, canonical states, idempotency, reconciliation, Capital Governor, lifecycle, AI Supervisor, live authorization — already implemented additively in `engine/execution/`, outside the frozen core |
+| 6a | **New** owner trust root | — | `engine/execution/owner_authority.py` and `scripts/sign_owner_artifact.py`. The signing key is owner-held and must never enter the repository. |
 | 7 | `engine/build_guard.py` | self-hashed | Register the new safety-critical modules in `CRITICAL_FILES` |
 | 8 | `infra/core_v06.sha256` | `a00166f5…3252` | Superseded by a new core digest (e.g. `core_v09.sha256`) |
 | 9 | `engine/approved_config.sha256` | `270fbb5f…aa15` | Re-issue via `approve_config.py` |
@@ -271,7 +298,7 @@ New tests required (proposed, one per invariant):
 Not code. These are separate, owner-verifiable prerequisites. Until they close, implementation of this amendment should not begin:
 
 1. **Strategy verdict is `UNPROVEN`.** Latest synthetic causal stress: worst net P&L ≈ **−$5,347.07**, best ≈ **+$163.97**, worst drawdown ≈ **5.385%**, all small-sample. Enabling real capital behind an unproven edge is a commercial decision for the owner, and must be recorded as such.
-2. **No broker integration exists.** No gateway, adapter or transport is present anywhere in the repository.
+2. ~~No broker integration exists.~~ **Partially closed.** The gateway, adapter/transport contract, registry, intent model, gate, Capital Governor, reconciliation, supervisor and lifecycle now exist in `engine/execution/` — additive, outside the frozen core. **No real broker adapter ships**, deliberately: a live one needs an authorized programmable interface plus owner credentials, and must pass the same conformance and reconciliation requirements. Where no authorized interface exists the answer remains `BROKER_AUTOMATION_UNSUPPORTED`.
 3. **No verification of profitability evidence.** Real multi-regime historical / walk-forward evidence is outstanding.
 4. **Market data is `DEMO`.** No real feeds, no entitlement/provenance evidence, no independent verifier configured.
 5. **No formal exchange-calendar / session engine.** Sessions, holidays, early closes and DST transitions are not covered; the source specification makes session truth mandatory before new exposure.
@@ -306,16 +333,19 @@ Not code. These are separate, owner-verifiable prerequisites. Until they close, 
 ## 17. Residual risks and open items (flagged, not resolved)
 
 1. **The source specification is truncated.** It ends mid-sentence in §27 at `"BROKER_ACK`. The canonical execution-state list is incomplete and all sections after §27 are absent. Reconciliation details, conformance requirements, deployment and QA sections cannot be reviewed until supplied.
-2. **The test suite is not integrity-pinned.** `build_guard.CRITICAL_FILES` contains no test file, and `infra/approved_infra.json` covers no test file. The 125 tests that substantiate every safety claim in this repository can therefore be weakened **without** tripping `EXECUTABLE_BUILD_LOCK`. Recommended hardening, independent of this amendment: register `tests/` and `infra/tests/` in the build and infra manifests.
-3. **No CI test gate.** No workflow under `.github/workflows/` invokes any test runner; `tests/run_tests.py` also omits the Student and cloud-shell suites. The "125/125 PASS" baseline was produced manually. A live-capital system should not depend on a manually-run, partially-wired suite.
+2. ~~The test suite is not integrity-pinned.~~ **RESOLVED.** `tests/suite_integrity.py` pins every safety suite, the gate script `scripts/verify_all.sh`, the pre-push hook and the CI workflow in `tests/approved_tests.json`; drift fails the run. Verified by tampering with a pinned file, which produced `unapproved safety-suite drift detected` and a non-zero exit.
+3. ~~No CI test gate.~~ **RESOLVED.** `.github/workflows/trips-safety-suites.yml` runs `scripts/verify_all.sh` on push and pull request — the same script runnable locally, so local and CI cannot diverge. It has executed green since the repository's Actions entitlement was restored.
 4. **Live mode increases the consequence of every existing gap.** Every unresolved item above is currently contained by `PAPER_FIRST`. Removing that containment transfers the burden to the new §6 chain, which does not yet exist.
 5. **`HARD_LIMITS` live values are unreviewed.** They were chosen for a paper research system.
+6. **The owner-signature mechanism was forgeable as drafted. FOUND AT REVIEW, NOW CLOSED.** The
+   overriding mechanism this amendment depends on conveyed authority through a boolean any caller
+   could set. Full finding and reproduction in §20.1.
 
 ---
 
 ## 18. Approval procedure (human-gated, in order)
 
-1. **Owner reads this document.** Decision: Approve / Reject / Amend. (§18.0 — *this step is where we are now.*)
+1. **Owner reads this document.** Decision: Approve / Reject / Amend. (Engineering and security review are recorded in §20; §20.3 states precisely what still blocks approval.)
 2. If Approve: supply the missing specification sections (§17.1) and close §14 preconditions 1–6.
 3. Owner supplies Capital Governor values (§10) and the `HARD_LIMITS` live review.
 4. Implement the §12 change set on a branch. No autonomous component may perform or schedule this.
@@ -332,8 +362,91 @@ Steps 7 and 8 are deliberately distinct. This amendment is scoped to making thos
 
 | Role | Name | Decision | Date |
 |---|---|---|---|
-| Owner | | ☐ Approve ☐ Reject ☐ Amend | |
-| Engineering review | | ☐ | |
-| Security review | | ☐ | |
+| Owner | **left blank deliberately — only the owner may decide this row, and it cannot be signed by a program** | ☐ Approve ☐ Reject ☐ **Amend** | |
+| Engineering review | Trip's execution-layer review | **`AMEND`** — mechanism sound after the §20.1 repair; prerequisites in §20.3 outstanding | 2026-09-29 |
+| Security review | Trip's execution-layer review | **`AMEND`** — one critical authorization-integrity defect found and fixed; no unfixed defect remains in the mechanism | 2026-09-29 |
 
-**Drafting note:** no file in the frozen core, no configuration value, no fingerprint and no manifest was modified in the production of this draft. `infra/core_v06.sha256` verifies 16/16 and the 125-test baseline is unchanged. This amendment takes effect only via an explicit owner decision and the §12/§18 procedure.
+---
+
+## 20. Review record (engineering and security)
+
+### 20.1 Critical finding: the owner signature was a boolean
+
+`verify_amendment()` accepted a proposal carrying `owner_signed=True` — a plain field any caller
+sets. The chain that followed was complete and released real capital:
+
+```
+AmendmentProposal(owner_signed=True)   -> AMENDMENT_APPLICABLE
+release_basis_from_verdict(verdict)    -> CoreStateBasis(source="VERIFIED_AMENDMENT")
+Lifecycle(Stage.LIVE_ENABLED, release_basis=basis) -> may_transmit_live()["permitted"] is True
+UniversalBrokerGateway.submit(...)     -> outcome TRANSMITTED, adapter.submitted non-empty
+```
+
+Reproduced against the committed tree: **a live order reached the broker adapter while
+`PAPER_FIRST` and the `config_guard` mode restriction were still in force on disk**
+(`prohibition_rule_present == ['PAPER_FIRST']`, permitted modes `['paper']`). The frozen-boundary
+verdict for honest callers was never affected — this was an authorization-integrity hole, not a
+boundary-logic bug — but it defeated the exact claim this amendment rests on, and the module
+docstring's assertion that it "cannot be triggered by a caller passing a convenient argument" was
+false as written.
+
+Two further paths compounded it:
+
+| # | Path | Consequence |
+|---|---|---|
+| 1 | `LiveAuthorization(owner_signed=True)` — also a boolean | The two owner acts collapsed into one: decision A implied decision B by construction |
+| 2 | `Lifecycle(Stage.LIVE_ENABLED, release_basis=basis)` accepted any basis with no authorization at all | The transition machine and its owner-authorization requirement were bypassable at construction time |
+
+### 20.2 Repair (implemented and regression-tested)
+
+- **`engine/execution/owner_authority.py`** (new) — the trust root. HMAC-SHA256 over the canonical
+  payload, key supplied by the owner via `TRIPS_OWNER_AUTHORITY_KEY` (or `…_KEY_FILE`), never stored
+  in this repository, read at call time and never cached. Fail-closed codes:
+  `OWNER_AUTHORITY_KEY_NOT_CONFIGURED`, `OWNER_AUTHORITY_KEY_TOO_WEAK`, `OWNER_SIGNATURE_REQUIRED`,
+  `OWNER_SIGNATURE_INVALID`.
+- **`owner_signed` booleans deleted** from both `AmendmentProposal` and `LiveAuthorization`. Passing
+  one is now a `TypeError`; authority is the `signature` field only.
+- **Signatures cover contents**, so a proposal cannot be altered after signing — changing
+  `target_mode`, the rule lists or even `amendment_id` yields `OWNER_SIGNATURE_INVALID`.
+- **`Lifecycle` refuses a release basis** without a valid signed authorization: a basis is evidence,
+  not authority, so decision A can no longer imply decision B.
+- **Preflight refuses an unsigned authorization artifact** for the approved-capital-governor
+  precondition, instead of treating a well-formed but unauthorized artifact as evidence.
+- **`scripts/sign_owner_artifact.py`** (new) — the owner-side signing tool for the two acts.
+  `--status` reports whether owner acts are possible, and prints no key material.
+- **8 new tests**, including a regression that replays the attack above and asserts nothing reaches
+  the broker, plus the honest path (signed proposal **and** signed authorization) still transmitting.
+
+Stated plainly, the residual trust assumption: a process that can read the owner key can sign.
+Keep the key out of the trading process's ordinary runtime environment, and treat its presence as
+itself privileged.
+
+### 20.3 What still blocks approval
+
+Approval is **not** blocked by the text of §3 — the `LIVE_GATE` replacement is sound, and the
+transmission path is real code provably gated by the frozen boundary. It is blocked by:
+
+1. **No owner key exists.** `owner_authority_status()` reports `configured: false`, so no owner act
+   is currently possible at all. This is correct fail-closed behaviour, and it is also the state in
+   which approval would be meaningless.
+2. **§14 prerequisites 1, 3, 4, 5, 6 remain open** — strategy `UNPROVEN`, no walk-forward
+   profitability evidence, market data still `DEMO`, no exchange-calendar/session engine, no durable
+   hosted supervisor bridge.
+3. **Capital Governor values are still unset** (§10). They are an owner input and none was invented.
+4. **The source specification is still truncated mid-§27** (§17.1), so the canonical execution-state
+   list and everything after it remain unreviewed.
+5. **Only the owner can perform §12.** This document's mechanism refuses to apply itself, and
+   re-freezing `infra/core_v06.sha256` and re-issuing the derived manifests is an owner act.
+
+### 20.4 Unchanged by this review
+
+The frozen core was not modified in any way: `infra/core_v06.sha256` verifies **16/16**, the infra
+manifest remains `1c673d0e…d059`, and both frozen blockers — the `PAPER_FIRST` rule and the
+`config_guard` paper-only restriction — are still reported by `live_release_requirements()`. The
+transmission path remains real code whose only blocker is the frozen invariant, and
+`apply_amendment()` still refuses.
+
+**Drafting note:** no file in the frozen core, no configuration value, no fingerprint and no
+manifest was modified in the production or the review of this document. `infra/core_v06.sha256`
+verifies 16/16 and the 240-test baseline is green. This amendment takes effect only via an explicit
+owner decision and the §12/§18 procedure.

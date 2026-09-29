@@ -154,6 +154,13 @@ from .lifecycle import (  # noqa: E402
     LiveAuthorization,
     Stage,
 )
+from .owner_authority import (  # noqa: E402
+    KEY_ENV as OWNER_AUTHORITY_KEY_ENV,
+    OwnerAuthorityError,
+    owner_authority_status,
+    sign_owner_payload,
+    verify_owner_signature,
+)
 from .preflight import (  # noqa: E402
     ANOMALY_CHECKS,
     PRECONDITIONS,
@@ -246,4 +253,6 @@ __all__ = [
     "fingerprint_profile", "frozen_config_mode", "frozen_constitution_rule_ids",
     "frozen_hard_limits", "interpret_supervisor_output", "trade_valid",
     "verify_frozen_core_digest",
+    "OWNER_AUTHORITY_KEY_ENV", "OwnerAuthorityError", "owner_authority_status",
+    "sign_owner_payload", "verify_owner_signature",
 ]

@@ -20,7 +20,9 @@ local to the suite, never shipped by the library.
 
 from __future__ import annotations
 
+import os
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +30,11 @@ TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 
 import test_execution_layer as base  # noqa: E402
+
+# This suite exercises the honest owner path, so its own process installs a synthetic owner key.
+# (run_all_tests.py runs every suite in an isolated subprocess.) Fail-closed behaviour is asserted
+# explicitly by the tests that remove the key again.
+os.environ[base.OWNER_AUTHORITY_KEY_ENV] = base.TEST_OWNER_KEY
 
 from execution import (  # noqa: E402
     AMENDMENT_APPLICABLE,
@@ -38,11 +45,13 @@ from execution import (  # noqa: E402
     AmendmentProposal,
     CapitalGovernor,
     CycleRouter,
+    ExecutionLayerError,
     ExecutionState,
     FrozenLiveBoundary,
     HealthGateEvidence,
     IntentPolicy,
     Lifecycle,
+    LiveAuthorization,
     LiveEnvironmentAttestation,
     OrderCapabilities,
     PluginClassification,
@@ -63,6 +72,7 @@ from execution import (  # noqa: E402
     live_release_requirements,
     release_basis_from_verdict,
     route_frozen_cycle,
+    sign_owner_payload,
     verify_amendment,
 )
 from providers import DemoProvider  # noqa: E402
@@ -82,19 +92,28 @@ def live_governor(**overrides):
 
 
 def amendment_proposal(**overrides):
+    """A properly owner-SIGNED proposal. Pass ``signature=`` to build a deliberately bad one."""
     now = datetime.now(timezone.utc)
     payload = {
         "amendment_id": "AMENDMENT-01-LIVE-GATE",
         "adds_rules": ("LIVE_GATE",),
         "removes_rules": ("PAPER_FIRST",),
         "target_mode": "live",
-        "owner_signed": True,
         "issued_at": now.isoformat(),
         "expires_at": (now + timedelta(days=365)).isoformat(),
         "rationale": "replace PAPER_FIRST with the deterministic LIVE_GATE",
     }
     payload.update(overrides)
-    return AmendmentProposal(**payload)
+    unsigned = AmendmentProposal(**payload)
+    if "signature" in overrides:
+        return unsigned
+    return replace(unsigned, signature=sign_owner_payload(unsigned.signed_payload()))
+
+
+def owner_authorization():
+    """Owner decision B. Kept distinct from decision A: a basis alone is not authority."""
+    return base.signed_authorization(broker_id="test-double", account_id="ACCT-1",
+                                     environment="TEST_ENV")
 
 
 def verified_basis():
@@ -103,7 +122,8 @@ def verified_basis():
     return release_basis_from_verdict(verdict)
 
 
-def live_ready_router(*, basis=None, stage=Stage.LIVE_LOCKED, requested_bars=240):
+def live_ready_router(*, basis=None, stage=Stage.LIVE_LOCKED, requested_bars=240,
+                      authorization=None):
     """Everything a live route needs, so the ONLY thing left to refuse is the frozen boundary."""
     config = base.trade_config()
     bars = DemoProvider().bars("SPY", requested_bars)
@@ -116,7 +136,8 @@ def live_ready_router(*, basis=None, stage=Stage.LIVE_LOCKED, requested_bars=240
     router = CycleRouter(
         config=config, approved_config_hash=base.fingerprint_config(config),
         governor=live_governor(), adapter=adapter, registry=registry,
-        lifecycle=Lifecycle(stage, FrozenLiveBoundary(), release_basis=basis),
+        lifecycle=Lifecycle(stage, FrozenLiveBoundary(), release_basis=basis,
+                            authorization=authorization),
         provider=base.TestProvider("a", "fam_a", bars=bars),
         secondary_provider=base.TestProvider("b", "fam_b", bars=bars),
         session_calendar=base.session_calendar(), expected_account_id="ACCT-1",
@@ -202,7 +223,8 @@ def test_verified_owner_amendment_opens_the_production_boundary():
     assert verdict["boundary"]["released"] is True
     basis = release_basis_from_verdict(verdict)
     assert basis.source == "VERIFIED_AMENDMENT" and basis.mode == "live"
-    released = Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis)
+    released = Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                         authorization=owner_authorization())
     assert released.may_transmit_live()["permitted"] is True
     assert released.core_state_basis().source == "VERIFIED_AMENDMENT"
     # The same production boundary still refuses the unamended core.
@@ -210,10 +232,10 @@ def test_verified_owner_amendment_opens_the_production_boundary():
 
 
 def test_unsigned_amendment_is_refused():
-    verdict = verify_amendment(amendment_proposal(owner_signed=False))
+    verdict = verify_amendment(amendment_proposal(signature=""))
     assert verdict["code"] == "OWNER_SIGNATURE_REQUIRED"
     assert verdict["applicable"] is False
-    assert "no other actor may amend" in verdict["reasons"][0]
+    assert "no owner signature" in verdict["reasons"][0]
 
 
 def test_amendment_may_only_touch_the_prohibition_and_the_authorization_rule():
@@ -251,7 +273,7 @@ def test_expired_amendment_is_refused():
     assert verdict["code"] == "AMENDMENT_EXPIRED"
     try:
         AmendmentProposal(amendment_id="x", adds_rules=("LIVE_GATE",), removes_rules=(),
-                          target_mode="live", owner_signed=True, issued_at="2026-01-01T00:00:00",
+                          target_mode="live", issued_at="2026-01-01T00:00:00",
                           expires_at="2026-01-02T00:00:00")
         assert False, "expected AmendmentError for a naive timestamp"
     except AmendmentError:
@@ -269,7 +291,7 @@ def test_amendment_application_is_refused_because_it_is_an_owner_act():
 
 def test_release_basis_is_refused_from_a_non_applicable_amendment():
     try:
-        release_basis_from_verdict(verify_amendment(amendment_proposal(owner_signed=False)))
+        release_basis_from_verdict(verify_amendment(amendment_proposal(signature="")))
         assert False, "expected AmendmentApplicationRefused"
     except AmendmentApplicationRefused:
         pass
@@ -418,7 +440,8 @@ def test_amended_core_transmits_a_live_money_order_to_the_test_broker():
         adapter = base.FakeAdapter()
         gateway = UniversalBrokerGateway(
             adapter=adapter, governor=base.governor(),
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis))
+            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                                authorization=owner_authorization()))
         result = gateway.submit(live_order, preflight_report=base.permissive_report(live_order, now=now),
                                portfolio=base.portfolio(), holdings={}, expected_account_id="ACCT-1",
                                expected_environment="TEST_ENV", now=now)
@@ -436,7 +459,8 @@ def test_frozen_cycle_routes_a_live_money_order_once_the_amendment_is_verified()
     """End to end: frozen decision -> frozen gates -> governor -> gate -> broker."""
     with base.isolated_store():
         now = base.in_session_now()
-        router, adapter = live_ready_router(basis=verified_basis(), stage=Stage.LIVE_ENABLED)
+        router, adapter = live_ready_router(basis=verified_basis(), stage=Stage.LIVE_ENABLED,
+                                            authorization=owner_authorization())
         runtime = frozen_cycle_runtime(signal_bar_ts=(now - timedelta(hours=2)).isoformat())
         report = route_frozen_cycle(router, runtime=runtime, prices={"SPY": 100.0},
                                     **route_kwargs(now))
@@ -463,7 +487,8 @@ def test_amended_core_still_refuses_a_short_or_out_of_scope_order():
             adapter = base.FakeAdapter()
             gateway = UniversalBrokerGateway(
                 adapter=adapter, governor=base.governor(),
-                lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis))
+                lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                                authorization=owner_authorization()))
             result = gateway.submit(bad, preflight_report=base.permissive_report(bad, now=now),
                                    portfolio=base.portfolio(), holdings={},
                                    expected_account_id="ACCT-1", expected_environment="TEST_ENV",
@@ -480,7 +505,8 @@ def test_amended_core_still_cannot_bypass_a_supervisor_halt():
         gateway = UniversalBrokerGateway(
             adapter=adapter, governor=base.governor(), safety=safety,
             lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(),
-                                release_basis=verified_basis()))
+                                release_basis=verified_basis(),
+                                authorization=owner_authorization()))
         safety.apply(interpret_supervisor_output(
             {"finding": "SUPERVISOR_HALT_REQUEST", "evidence_refs": ["e:1"],
              "explanation": "unresolved ambiguity"}))
@@ -502,7 +528,8 @@ def test_amended_core_does_not_relax_the_capability_or_representability_contract
         adapter = base.FakeAdapter(order_caps=caps)
         gateway = UniversalBrokerGateway(
             adapter=adapter, governor=base.governor(),
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis))
+            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                                authorization=owner_authorization()))
         result = gateway.submit(order, preflight_report=base.permissive_report(order, now=now),
                                portfolio=base.portfolio(), holdings={}, expected_account_id="ACCT-1",
                                expected_environment="TEST_ENV", now=now)
@@ -512,13 +539,128 @@ def test_amended_core_does_not_relax_the_capability_or_representability_contract
         undeclared = base.UndeclaredOrderCapsAdapter()
         gateway2 = UniversalBrokerGateway(
             adapter=undeclared, governor=base.governor(),
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis))
+            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                                authorization=owner_authorization()))
         again = base.intent(intent_id="int-2", idempotency_key="idem-2")
         result2 = gateway2.submit(again, preflight_report=base.permissive_report(again, now=now),
                                  portfolio=base.portfolio(), holdings={}, expected_account_id="ACCT-1",
                                  expected_environment="TEST_ENV", now=now)
         assert result2.outcome == "REFUSED_BY_CAPABILITY"
         assert undeclared.submitted == []
+
+
+# ---------------------------------------------------------------------------
+# Owner signature integrity — regression for the closed forgery hole
+# ---------------------------------------------------------------------------
+
+
+def test_there_is_no_owner_signed_boolean_left_to_forge():
+    """Authority is a signature, not a flag. A flag is settable by any caller."""
+    try:
+        AmendmentProposal(amendment_id="x", adds_rules=("LIVE_GATE",),
+                          removes_rules=("PAPER_FIRST",), target_mode="live",
+                          issued_at="2026-01-01T00:00:00+00:00",
+                          expires_at="2026-01-02T00:00:00+00:00", owner_signed=True)
+        assert False, "owner_signed must not exist: a boolean is forgeable"
+    except TypeError:
+        pass
+    assert not hasattr(AmendmentProposal, "owner_signed")
+    assert not hasattr(LiveAuthorization, "owner_signed")
+
+
+def test_amendment_fails_closed_when_no_owner_key_is_configured():
+    signed = amendment_proposal()  # signed while the key is available
+    with base.owner_key_unconfigured():
+        assert live_release_requirements()["owner_authority"]["configured"] is False
+        verdict = verify_amendment(signed)
+        assert verdict["code"] == "OWNER_AUTHORITY_KEY_NOT_CONFIGURED"
+        assert verdict["applicable"] is False
+    # With the key restored the very same proposal verifies again.
+    assert verify_amendment(signed)["code"] == AMENDMENT_APPLICABLE
+
+
+def test_amendment_with_a_wrong_signature_is_refused():
+    verdict = verify_amendment(amendment_proposal(signature="ab" * 32))
+    assert verdict["code"] == "OWNER_SIGNATURE_INVALID"
+    assert verdict["applicable"] is False
+
+
+def test_a_modified_proposal_does_not_verify_against_the_owner_signature():
+    """The signature covers the contents, so tampering after signing is detectable."""
+    signed = amendment_proposal()
+    assert verify_amendment(signed)["code"] == AMENDMENT_APPLICABLE
+    assert verify_amendment(replace(signed, target_mode="paper"))["code"] == \
+        "OWNER_SIGNATURE_INVALID"
+    assert verify_amendment(replace(signed, adds_rules=("LIVE_GATE", "SKIP_RISK")))["code"] == \
+        "OWNER_SIGNATURE_INVALID"
+    assert verify_amendment(replace(signed, amendment_id="forged-02"))["code"] == \
+        "OWNER_SIGNATURE_INVALID"
+
+
+def test_an_unsigned_live_authorization_is_not_an_authorization():
+    now = datetime.now(timezone.utc)
+    unsigned = LiveAuthorization(
+        strategy_build_id="b" * 64, config_id="c" * 64, risk_profile_id="r" * 64,
+        governor_profile_id="g" * 64, broker_id="test-double", account_id="ACCT-1",
+        environment="TEST_ENV", issued_at=(now - timedelta(minutes=1)).isoformat(),
+        expires_at=(now + timedelta(hours=1)).isoformat())
+    assert unsigned.identity_complete() is True, "well-formed, but not authorized"
+    valid, reasons = unsigned.is_valid(now)
+    assert valid is False
+    assert any("OWNER_SIGNATURE_REQUIRED" in reason for reason in reasons)
+
+
+def test_release_basis_without_a_signed_owner_authorization_is_refused():
+    """Owner decision A must not imply decision B: a basis is evidence, not authority."""
+    try:
+        Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=verified_basis())
+        assert False, "expected ExecutionLayerError"
+    except ExecutionLayerError as exc:
+        assert "signed live authorization" in str(exc)
+
+
+def test_release_basis_with_a_self_minted_unsigned_authorization_is_refused():
+    now = datetime.now(timezone.utc)
+    basis = verified_basis()
+    unsigned = LiveAuthorization(
+        strategy_build_id="b" * 64, config_id="c" * 64, risk_profile_id="r" * 64,
+        governor_profile_id="g" * 64, broker_id="test-double", account_id="ACCT-1",
+        environment="TEST_ENV", issued_at=(now - timedelta(minutes=1)).isoformat(),
+        expires_at=(now + timedelta(hours=1)).isoformat())
+    try:
+        Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                  authorization=unsigned)
+        assert False, "expected ExecutionLayerError"
+    except ExecutionLayerError as exc:
+        assert "live authorization is not valid" in str(exc)
+
+
+def test_the_demonstrated_forgery_no_longer_reaches_the_broker():
+    """Regression: a caller-set boolean used to yield a live order. It now cannot.
+
+    Before the owner signature existed, ``AmendmentProposal(owner_signed=True)`` produced an
+    ``AMENDMENT_APPLICABLE`` verdict, hence a VERIFIED_AMENDMENT basis, hence TRANSMITTED.
+    """
+    with base.isolated_store():
+        signed = amendment_proposal()
+        with base.owner_key_unconfigured():
+            verdict = verify_amendment(signed)
+            assert verdict["code"] == "OWNER_AUTHORITY_KEY_NOT_CONFIGURED"
+            assert verdict["applicable"] is False
+            try:
+                release_basis_from_verdict(verdict)
+                assert False, "expected AmendmentApplicationRefused"
+            except AmendmentApplicationRefused:
+                pass
+        # With no basis obtainable, the honest end-to-end path still refuses and sends nothing.
+        router, adapter = live_ready_router()
+        runtime = frozen_cycle_runtime(
+            signal_bar_ts=(base.in_session_now() - timedelta(hours=2)).isoformat())
+        report = route_frozen_cycle(router, runtime=runtime, prices={"SPY": 100.0},
+                                    **route_kwargs(base.in_session_now()))
+        assert report["transmitted"] == 0
+        assert adapter.submitted == []
+        assert report["results"][0]["outcome"] == "LIVE_LOCKED_REFUSAL"
 
 
 if __name__ == "__main__":

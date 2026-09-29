@@ -8,11 +8,11 @@
     "tests/run_tests.py": "db4b312a7cfb9aece465bffdfb695092accb8348d922f93c71890851cf27bc0a",
     "tests/suite_integrity.py": "fa912b7945b56ec15c8382c9586310b8fa93a70a04562885d04a90eb6b72134b",
     "tests/test_engine.py": "87c8a5f594f3ff6a06727be3b9767e7cba0309261fecb3eb0126df0b032d9dfc",
-    "tests/test_execution_layer.py": "dc4ef146d031ec24b25236d553b3430653882b64e182e0d927b8b5740e510b37",
-    "tests/test_live_gate_amendment.py": "195d8cf48fbc4664914b9970400a00a7ffd4e08b53bffa11a4ca2c099af5625a",
+    "tests/test_execution_layer.py": "ea0a8b2db10909444ae4b5e7a1eb15e21f8b0b6fda43689cdce2b7a5a411738f",
+    "tests/test_live_gate_amendment.py": "3ccc18967b34b5f3d75a58121a30437e8a80dcb57267229fc7f7db37e33aaf3f",
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3"
   },
-  "manifest_hash": "6cb4b86ea62d090229eb691d4a9ba01b142cd965229b92bf487f2044ccdc1dac",
+  "manifest_hash": "9b9c98cb05a7b3bd9cc8ebcdef1809fea6dffe3297c3850d11606bb25283f484",
   "schema_version": 1
 }
