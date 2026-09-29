@@ -65,6 +65,9 @@ CRITICAL_PROJECT_FILES = (
     # The owner-side signer handles the private trust root. A modified copy could sign a different
     # artifact or mishandle key material, so the reviewed signer is part of executable integrity.
     "scripts/sign_owner_artifact.py",
+    # This is the only reviewed external-readiness entry point. Pin it so secret handling and
+    # the read-only/no-gateway invariant cannot drift outside build review.
+    "scripts/trips_external_readiness.py",
 )
 
 
