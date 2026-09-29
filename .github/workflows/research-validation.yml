@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  pr1-research-validation:
+  research-validation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -27,7 +27,19 @@ jobs:
             --output /tmp/latest_backtest_report.json \
             --trial-log /tmp/trial_log.jsonl
           cat /tmp/latest_backtest_report.json
+      - name: WP3 no-data shadow smoke test
+        run: |
+          rm -f /tmp/trips-shadow-journal.jsonl /tmp/trips-shadow-heartbeat.json /tmp/trips-forward-report.json
+          python research/shadow/runner.py \
+            --data-dir research/data/daily \
+            --journal /tmp/trips-shadow-journal.jsonl \
+            --heartbeat /tmp/trips-shadow-heartbeat.json
+          python research/shadow/shadow_report.py \
+            --data-dir research/data/daily \
+            --journal /tmp/trips-shadow-journal.jsonl \
+            --output /tmp/trips-forward-report.json
+          cat /tmp/trips-forward-report.json
       - name: Research tests
         run: python research/tests/run_research_tests.py
-      - name: PR-1 scope guard
-        run: python research/tools/check_scope.py --profile pr1
+      - name: PR-2 scope guard
+        run: python research/tools/check_scope.py --profile pr2
