@@ -26,7 +26,7 @@
     "engine/execution/channels.py": "760602d3b840a9a1f96cdbe7ace499dadad2a3d44df77e56e9c2c9c69e49ba41",
     "engine/execution/conformance.py": "20cb87074ea653b4d718425eb296e503624ef45a900b9a248fd43e7eee0a7370",
     "engine/execution/contracts.py": "a2bb5736dbb54e622f664c1479851a3fec52bf29cb031d81b33bddbf8a8358ec",
-    "engine/execution/cycle_bridge.py": "98cb62fd8d37c7d94318a2cc554f6a568ea38f361588026af81206ed88cd947c",
+    "engine/execution/cycle_bridge.py": "6d4b44d0ed701c6baca30f016f01cdf8f25a3cf76708c2a0ed6446f3a35fdb07",
     "engine/execution/durable_store.py": "eabbf26493661bb3aa3b48f3bbfbc7fb46ce3f215b53db8bf5e93f8bb8163207",
     "engine/execution/ed25519.py": "e8625ac08976194daeba8de02855a620bcf44f8a99582bf08ab59be4436e7617",
     "engine/execution/exchange_calendar.py": "a0865d882b559f395964f5aa6f73c1072b977cff9b59f4b1d859e415784f3a5a",
@@ -48,6 +48,7 @@
     "engine/execution/status.py": "af07c1b88f839fc13ca5e0dd7ccef7aded11b1cf973c2107c83552b49e17c408",
     "engine/execution/supervisor.py": "f0545eaf2c4a496f22a26c911b4755f770b56504887b6b80f2b85cb3a4fd7939",
     "engine/execution/supervisor_bridge.py": "757cb0abdcbd049a0135a44eecae253ec1cba4b0c1d0240d06877617bd36b211",
+    "engine/execution/task_safety_kernel.py": "f149bc19d62d91505c8d5f6ebca16d3c32b7ab71190d9093a717e45b89b9a48e",
     "engine/forge_agent.py": "64065dcd8cf71ece59a812397a90776a3949de6ac587dda12cad57c7e77b0b15",
     "engine/health_daemon.py": "be51248405c1333e2af1a73ef69774af81d3978e751672cd1fddb8c225e627eb",
     "engine/health_engine.py": "16574e09be480eb053e3475a8b9d2d35cabee1ddd8f637e87f8841658bdfd20b",
@@ -68,6 +69,6 @@
     "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e",
     "scripts/sign_owner_artifact.py": "3204048c7ee413b465800477165a656429943ed61407c2f302e1f4cb6bd3b438"
   },
-  "manifest_hash": "0fd28b3518271e7124d0058eb5b63e03310e165c0993c05df6318fba68717522",
+  "manifest_hash": "a6f836db9a42657042251f34566ae7c820751d1a607c8894dc723b81515d735c",
   "schema_version": 2
 }
