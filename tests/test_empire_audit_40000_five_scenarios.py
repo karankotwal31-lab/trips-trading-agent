@@ -215,6 +215,46 @@ def _task_context(bar: Bar, scenario: str, cycle: int):
     return TASKContext(**values), now, fault
 
 
+
+def _guaranteed_task_fault_probe(task: TASKKernel, scenario: str, bar: Bar) -> dict:
+    """Force one or more execution-safety faults through TASK regardless of strategy timing."""
+    base = dict(
+        market_data_healthy=True, venue_state="OPEN", observed_price=float(bar.close),
+        spread_bps=10.0, average_daily_volume=max(float(bar.volume), 10_000.0),
+        broker_connected=True, cancel_on_disconnect_active=True, instrument_kind="CASH",
+        working_orders=(), recent_message_times=(), recent_execution_times=(),
+        compliance={"strong_auth": True, "venue_tag": True}, contract_lifecycle=None,
+    )
+    now = datetime(2026, 9, 30, 18, 0, tzinfo=timezone.utc)
+    probes = {
+        "TREND_COMPOUND": [("REPEATED_EXECUTION", {"recent_execution_times": tuple((now - timedelta(seconds=i + 1)).isoformat() for i in range(3))}, "REPEATED_EXECUTION_LIMIT")],
+        "RANGE_WHIPSAW": [("SELF_MATCH", {"working_orders": ({"symbol": "SPY", "side": "SELL", "state": "OPEN"},)}, "SELF_MATCH_RISK")],
+        "CRASH_GAP_RECOVERY": [("BROKER_DISCONNECT", {"broker_connected": False}, "BROKER_DISCONNECTED")],
+        "LIQUIDITY_TRUTH_ATTACK": [
+            ("WIDE_SPREAD", {"spread_bps": 90.0}, "SPREAD_TOO_WIDE"),
+            ("STALE_DATA", {"market_data_healthy": False}, "MARKET_DATA_UNHEALTHY"),
+            ("COMPLIANCE_GAP", {"compliance": {"strong_auth": True}}, "VENUE_COMPLIANCE_UNVERIFIED"),
+        ],
+        "REGIME_ROTATION": [
+            ("VENUE_HALT", {"venue_state": "HALTED"}, "VENUE_STATE_NOT_ALLOWED"),
+            ("MESSAGE_STORM", {"recent_message_times": tuple((now - timedelta(milliseconds=50 * i)).isoformat() for i in range(8))}, "MESSAGE_RATE_LIMIT"),
+        ],
+    }[scenario]
+    outcomes = []
+    for name, changes, expected in probes:
+        values = dict(base)
+        values.update(changes)
+        ctx = TASKContext(**values)
+        proposal = TradeProposal(
+            symbol="SPY", side="BUY", desired_quantity=5, order_type="MARKET",
+            limit_price=None, reference_price=float(bar.close), strategy_id="guaranteed-fault-probe",
+        )
+        decision = task.evaluate(proposal, context=ctx, now=now)
+        passed = (not decision.allowed) and expected in decision.blocks
+        outcomes.append({"probe": name, "expected": expected, "blocks": list(decision.blocks), "passed": passed})
+    return {"cases": len(outcomes), "passed": sum(int(x["passed"]) for x in outcomes), "outcomes": outcomes}
+
+
 def _record_student_exit(student: dict, scenario: str, symbol: str, entry_ctx: dict, exit_event: dict, build_hash: str, config_hash: str):
     return observe_decision(
         student,
@@ -547,6 +587,9 @@ def _run_one(scenario: str, cfg: dict, build_hash: str, config_hash: str) -> dic
     except ValueError:
         promotion_blocked = True
 
+    fault_probe = _guaranteed_task_fault_probe(task, scenario, barsets["SPY"][WARMUP + CYCLES - 1])
+    assert fault_probe["passed"] == fault_probe["cases"]
+
     report = {
         "scenario": scenario,
         "starting_equity": STARTING_EQUITY,
@@ -569,6 +612,7 @@ def _run_one(scenario: str, cfg: dict, build_hash: str, config_hash: str) -> dic
         "constitution_rejections": constitution_rejections,
         "task_blocks": task_blocks,
         "task_reductions": task_reductions,
+        "guaranteed_task_fault_probe": fault_probe,
         "fault_attempts_reaching_task": fault_attempts,
         "fault_blocks": fault_blocks,
         "student": student_report,
@@ -654,6 +698,7 @@ def run_audit():
         "all_ledgers_valid": all(x["ledger_hash_chain_valid"] for x in results),
         "all_student_chains_valid": all(x["student_hash_chain_valid"] for x in results),
         "all_shadow_promotions_blocked_without_evidence": all(x["shadow_promotion_blocked"] for x in results),
+        "all_guaranteed_task_fault_probes_passed": all(x["guaranteed_task_fault_probe"]["passed"] == x["guaranteed_task_fault_probe"]["cases"] for x in results),
         "all_chatgpt_packets_advisory_only": all(
             x["chatgpt_supervisor"]["safe_counsel"]["execution_authority"] == "NONE"
             and x["chatgpt_supervisor"]["malicious_direct_order_rejected"]
@@ -699,6 +744,7 @@ def run_audit():
     assert aggregate["all_ledgers_valid"]
     assert aggregate["all_student_chains_valid"]
     assert aggregate["all_shadow_promotions_blocked_without_evidence"]
+    assert aggregate["all_guaranteed_task_fault_probes_passed"]
     assert aggregate["all_chatgpt_packets_advisory_only"]
     assert aggregate["live_orders_submitted"] == 0
     assert aggregate["real_money_used"] == 0
