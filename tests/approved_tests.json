@@ -4,19 +4,20 @@
     "infra/tests/test_cloud_shell.py": "cfbb061eb5c10ab78697fbc526413f3c9ed4f68ad6d76799d595a8b2784a4316",
     "scripts/githooks/pre-push": "86fdb49591f93447acc907b6e792df85c6e17f6087a81ba6695bea32c871cee2",
     "scripts/verify_all.sh": "0fcc8bca5ec97ff1c72f0eab6c5edf9e5d21844e7703d7e6475629e1aa6bdf7d",
-    "tests/run_all_tests.py": "7cdc21c39e9aaa6dea7766ec4887a7e3f8db97267423b0a9588a23a8f8f5f66c",
+    "tests/run_all_tests.py": "da983719ca259dc1f119c6f6bb98344977740f19337bcabed688a9fa14a835aa",
     "tests/run_tests.py": "db4b312a7cfb9aece465bffdfb695092accb8348d922f93c71890851cf27bc0a",
-    "tests/suite_integrity.py": "47f7a8756902f427cdf457fd531fa99b6ae4d56668b07c91357282d4701c07f8",
+    "tests/suite_integrity.py": "891af1611377bcd6d880ecf7171b61b9a5e1ba370f729993fb12e12abb5492ea",
     "tests/test_engine.py": "cd524411a706cd49152b037222cd58e063e41e91a96bf4825cbfd9afc43f18a6",
     "tests/test_execution_evidence.py": "0cc4ffaa7ed839f04d44ae435702070d522a02b3378ea056f15f828e4efc0463",
     "tests/test_execution_layer.py": "cd09bd7c1ef7fffb72db58561fa31116d17cd1f4d7417ba6cd03659762c6a28c",
     "tests/test_live_dry_run.py": "c35dd1274e6a6203155cba4722b316028ba223a59575e95700a5208eaa72fd12",
     "tests/test_live_gate_amendment.py": "2aa258e7e60777e55be6aced59e8b26d65aac788fba021cf3b767108a4559fd6",
-    "tests/test_live_readiness.py": "24b231674c3ba5ece49632877e11aed0b0011685a79947571aa8aa901c38174d",
+    "tests/test_live_readiness.py": "71a6b19ad3a2cdbadfda2dfe38ab803c20475e5cb020c2978f4b6e4f76cfdac2",
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3",
-    "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc"
+    "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc",
+    "tests/test_production_bootstrap.py": "a660e454a0331f0faf44d5f2a0ac076d3bc640c7e107fd398fe340a552e4dfd2"
   },
-  "manifest_hash": "194fd0e4f811b33832224fc78959dc42e10e47606570fb45da6d852891c6825f",
+  "manifest_hash": "69693b69b19356bdd98bcd71c482780bede9c52342c2ba45dd7a44bceeb38956",
   "schema_version": 1
 }
