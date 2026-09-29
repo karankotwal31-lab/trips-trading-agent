@@ -72,7 +72,12 @@ def test_dual_source_verification_passes_only_for_independent_realtime_families(
     primary = FakeRealtimeProvider(name="alpha", family="family-alpha")
     secondary = FakeRealtimeProvider(
         name="secondary", family="family-secondary", price_offset=0.10)
-    evidence = verify_dual_source_production_data(primary, secondary)
+    # Keep this structural test independent of the wall-clock's first 20 seconds after the hour.
+    # Production keeps the frozen 120-minute freshness limit; here 180 minutes prevents the
+    # previous fully closed bar from becoming a one-second boundary race when the newest bar is
+    # correctly dropped by the close-lag rule.
+    evidence = verify_dual_source_production_data(
+        primary, secondary, max_age_minutes=180)
     assert evidence.verified is True
     assert evidence.missing_symbols == ()
     assert evidence.failed_symbols == ()
