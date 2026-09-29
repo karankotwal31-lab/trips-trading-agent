@@ -21,12 +21,17 @@ local to the suite, never shipped by the library.
 from __future__ import annotations
 
 import atexit
+import json
+import shutil
+import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TESTS_DIR.parent
 sys.path.insert(0, str(TESTS_DIR))
 
 import test_execution_layer as base  # noqa: E402
@@ -53,6 +58,7 @@ from execution import (  # noqa: E402
     FrozenLiveBoundary,
     HealthGateEvidence,
     IntentPolicy,
+    owner_authority,
     Lifecycle,
     LiveAuthorization,
     LiveEnvironmentAttestation,
@@ -691,6 +697,115 @@ def test_release_basis_with_a_self_minted_unsigned_authorization_is_refused():
         assert False, "expected ExecutionLayerError"
     except ExecutionLayerError as exc:
         assert "live authorization is not valid" in str(exc)
+
+
+# ---------------------------------------------------------------------------
+# Owner signing CLI — regression for a tool that could not run at all
+# ---------------------------------------------------------------------------
+
+def _owner_cli(*arguments: str, stdin: str = "") -> subprocess.CompletedProcess:
+    """Invoke the owner's signing tool the way the owner does: as a subprocess.
+
+    The tool is argparse-based, so any construction error in the parser is invisible to tests that
+    only import its helpers. Running it for real is the only way to catch that class of bug.
+    """
+    script = Path(__file__).resolve().parent.parent / "scripts" / "sign_owner_artifact.py"
+    return subprocess.run([sys.executable, str(script), *arguments],
+                          input=stdin, capture_output=True, text=True, timeout=120)
+
+
+def test_the_owner_signing_tool_can_be_invoked_at_all():
+    """Regression: `--keygen` carried a `metavar`, which `store_true` rejects.
+
+    argparse raised TypeError while *constructing* the parser, so every invocation died before
+    parsing -- including the read-only `--status` check and both signing modes. The owner could
+    not generate a key, sign a decision, or even ask whether owner acts were possible. Nothing
+    caught it because no test ever executed the tool.
+    """
+    result = _owner_cli("--status")
+    assert result.returncode == 0, f"--status must succeed, got {result.returncode}: {result.stderr}"
+    status = json.loads(result.stdout)
+    # `--status` reports *whether* owner acts are possible. It must never carry key material:
+    # no seed, and no 64-hex private key. (Note the report legitimately names the boolean
+    # `private_key_in_process`, so that substring alone is not a leak.)
+    assert status["private_key_in_process"] is False
+    assert "private_key" not in status
+    assert "seed" not in result.stdout
+    assert set(status) >= {"configured", "key_id", "reason", "purposes"}
+
+
+def test_owner_keygen_signs_a_decision_and_verifies_it_offline():
+    """The whole owner path, end to end, in a temp dir: keygen -> install -> sign -> verify.
+
+    Uses a throwaway keypair confined to a temporary directory, so the repository's pinned owner
+    key is neither read nor written. This proves the machinery the owner depends on actually
+    works, rather than being assumed to work.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        # Run the tool against an isolated copy of the tree. The tool resolves the owner key as
+        # <repo>/engine/owner_public_key.json, and the suite's fixture only rebinds that path
+        # in-process -- a subprocess would otherwise read the real, unconfigured key file and
+        # would have to write to it. Copying keeps this test from touching the repository.
+        root = Path(scratch) / "tree"
+        root.mkdir()
+        shutil.copytree(REPO_ROOT / "engine", root / "engine")
+        shutil.copytree(REPO_ROOT / "scripts", root / "scripts")
+        script = root / "scripts" / "sign_owner_artifact.py"
+
+        def run(*arguments: str, stdin: str = ""):
+            return subprocess.run([sys.executable, str(script), *arguments],
+                                  input=stdin, capture_output=True, text=True, timeout=120)
+
+        key_path = Path(scratch) / "owner_ed25519.key"
+        generated = run("--keygen", "--key", str(key_path))
+        assert generated.returncode == 0, generated.stderr
+        assert key_path.exists()
+        # 0600: the private key must not be group- or world-readable.
+        assert key_path.stat().st_mode & 0o077 == 0, "owner private key must be 0600"
+        public = json.loads(generated.stdout)["owner_public_key"]
+        assert public["configured"] is True
+        assert public["algorithm"] == "ed25519"
+
+        # Install that public key in the isolated copy only, then let the tool sign against it.
+        (root / "engine" / "owner_public_key.json").write_text(
+            json.dumps(public, sort_keys=True) + "\n")
+        with base.owner_key_configured(bytes.fromhex(public["public_key"])):
+            now = datetime.now(timezone.utc)
+            proposal = {
+                "amendment_id": "AMENDMENT-01-LIVE-GATE",
+                "adds_rules": ["LIVE_GATE"],
+                "removes_rules": ["PAPER_FIRST"],
+                "target_mode": "live",
+                "issued_at": now.isoformat(),
+                "expires_at": (now + timedelta(days=1)).isoformat(),
+                "rationale": "signing-tool regression",
+            }
+            signed = run("proposal", "--key", str(key_path), stdin=json.dumps(proposal))
+            assert signed.returncode == 0, signed.stderr
+            result = json.loads(signed.stdout)
+            assert result["verified"] is True
+            assert result["key_id"] == public["key_id"]
+
+            # The signature the tool just produced must verify against the pinned key.
+            verified, code, _ = owner_authority.verify_owner_signature(
+                owner_authority.PURPOSE_AMENDMENT, AmendmentProposal(**proposal).signed_payload(),
+                result["signature"])
+            assert verified is True, code
+
+            # And it must be bound to this purpose: the same envelope is not a live authorization.
+            cross, cross_code, _ = owner_authority.verify_owner_signature(
+                owner_authority.PURPOSE_LIVE_AUTHORIZATION,
+                AmendmentProposal(**proposal).signed_payload(), result["signature"])
+            assert cross is False, "a decision A signature must never verify as decision B"
+            assert cross_code == owner_authority.SIGNATURE_INVALID
+
+
+def test_owner_keygen_refuses_to_write_the_private_key_into_the_repository():
+    """The repository is public; key material must never land inside it."""
+    inside = Path(__file__).resolve().parent.parent / "scripts" / "should_never_exist.key"
+    result = _owner_cli("--keygen", "--key", str(inside))
+    assert result.returncode != 0
+    assert not inside.exists(), "the tool must not create a key inside the repository"
 
 
 def test_the_demonstrated_forgery_no_longer_reaches_the_broker():

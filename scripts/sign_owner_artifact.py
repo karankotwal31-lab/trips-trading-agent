@@ -11,7 +11,7 @@ integrity, so nobody can substitute their own.
 
 Typical first run (offline, on the owner's machine)::
 
-    python3 scripts/sign_owner_artifact.py --keygen --out ~/.secrets/trips_owner_ed25519.key
+    python3 scripts/sign_owner_artifact.py --keygen --key ~/.secrets/trips_owner_ed25519.key
     # copy the printed "public_key" block into engine/owner_public_key.json, set configured=true,
     # then re-issue the build fingerprint:  cd engine && python3 approve_build.py
 
@@ -150,13 +150,17 @@ def main() -> int:
     parser.add_argument("--key", help=f"path to the owner private key (or set {PRIVATE_KEY_ENV})")
     parser.add_argument("--status", action="store_true",
                         help="report whether owner acts are possible; prints no key material")
-    parser.add_argument("--keygen", action="store_true", metavar="OUT",
-                        help="generate an Ed25519 keypair; writes the private key to OUT (0600)")
+    # NOTE: `store_true` actions do not accept `metavar`. Passing one made argparse raise
+    # TypeError while *constructing* the parser, so every invocation of this tool -- including
+    # read-only `--status` and both signing modes -- died before doing anything. The destination
+    # path is carried by `--key`, as the module docstring shows.
+    parser.add_argument("--keygen", action="store_true",
+                        help="generate an Ed25519 keypair; writes the private key to --key PATH (0600)")
     args = parser.parse_args()
 
     if args.keygen:
         if not args.key:
-            parser.error("--keygen requires --out PATH for the private key")
+            parser.error("--keygen requires --key PATH for the private key")
         return keygen(args.key)
     if args.status:
         print(json.dumps(owner_authority_status(), indent=2, sort_keys=True))
