@@ -20,6 +20,13 @@ jobs:
           python-version: "3.12"
       - name: Frozen Trip's safety gate
         run: sh ./scripts/verify_all.sh
+      - name: Preregistered Trend Harness first run
+        run: |
+          python research/trend/run.py \
+            --data-dir research/data/daily \
+            --output /tmp/latest_backtest_report.json \
+            --trial-log /tmp/trial_log.jsonl
+          cat /tmp/latest_backtest_report.json
       - name: Research tests
         run: python research/tests/run_research_tests.py
       - name: PR-1 scope guard
