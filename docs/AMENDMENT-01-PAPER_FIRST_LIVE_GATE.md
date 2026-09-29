@@ -523,28 +523,169 @@ probe, so it cannot drift — and a missing `paper_mode` check is treated as a r
 | Item | What was done |
 |---|---|
 | Exchange calendar | `engine/execution/exchange_calendar.py` computes the US cash-equity holiday, early-close and validity schedule deterministically. `SESSION_TRUTH_UNKNOWN` is no longer waiting on an operator's clipboard, and the calendar states its own provenance limits (not a live feed; halts are not represented). |
-| Broker adapters | `engine/execution/adapters.py` — Upstox and Alpaca adapters that validate and translate, with **no shipped channel**, so the library carries no network capability. |
+| Broker adapters | `engine/execution/adapters.py` — Upstox and Alpaca adapters that validate and translate. **Superseded by §22**: a real `BrokerChannel` now ships for each, in `engine/execution/channels.py`, with no credential in the repository. |
 | Ported from PR #1 | validate-before-network; integer-quantity discipline; refuse rather than truncate an over-long order tag; refuse a split acknowledgement instead of guessing which order it was; validate snapshot shape and never drop an identity-less order row. |
 | Deliberately not ported | `require_live_opt_in()` and its `TRIPS_LIVE_EXECUTION=ENABLED` flag — an operator-settable boolean carrying financial authority, the exact pattern §20.1 found forgeable. And `LiveLimits`' invented numbers, because capital values are an owner input. |
 | PR #1 | **Closed unmerged.** It touched no file on `main`. Its four genuinely good behaviours were ported; its second parallel authority model was not merged. |
 | Ceiling | `LIVE_READY_LOCKED` added. Reachable by any actor once the engineering checks pass, and it grants nothing: `may_transmit_live()` still refuses, and `LIVE_ENABLED` is still owner-only and only reachable *through* it. |
 
-### 21.4 What is left, and every item is the owner's
+### 21.4 What is left — superseded by §22
 
-`Lifecycle.live_readiness()` classifies the remainder. All eight engineering checks pass; what
-remains is exactly:
+The original §21.4 classified all six remaining blockers as owner-only work. **That
+classification was wrong**, and §22 corrects it. Items 3 and 4 each contained substantial
+engineering that had never been written, and a build that reported "only the owner's signature is
+left" was flattering itself. The table above is retained as the record of what was believed at the
+time; §22 is the record of what is true.
 
-| # | Blocker | Why an autonomous process cannot clear it |
-|---|---|---|
-| 1 | `owner_public_key_configured` | requires the owner's key |
-| 2 | `capital_governor_profile_set` | capital values are an owner input; **none was invented** |
-| 3 | `broker_channel_and_conformance` | an authorized programmable interface plus owner credentials |
-| 4 | `production_market_data` | real data credentials and entitlement evidence; provider mode is still `DEMO` |
-| 5 | `owner_signed_live_authorization` | owner decision B, signed with the owner's private key |
-| 6 | `constitutional_amendment_applied` | re-freezing the frozen core is an owner act through the approved change process |
+---
 
-Two items are no longer engineering blockers: the exchange calendar and the test/CI gate are done.
-One item is deliberately *not* a blocker and remains unfinished on purpose: profitability evidence
-cannot be produced without real market data, so it folds into item 4.
+## 22. Engineering remediation — evidence, not module presence
 
-**Ceiling reached: `LIVE_READY_LOCKED`. Nothing above it was attempted.**
+### 22.1 Module presence was not engineering completion
+
+`live_readiness()` answered five questions with `importlib.import_module`:
+
+```
+broker_adapters_present, reconciliation_engine_present, supervisor_provider_present,
+owner_trust_root_present, execution_authority_gate_present
+```
+
+All five passed the moment the files existed. A module that imports cleanly is a module that has
+been *written*; it is not a subsystem that has been *run*. Worse, the reading flattered the build:
+it let a program declare "everything left is the owner's signature" while the conformance suite,
+the broker channels, the market-data path and the supervisor bridge had never been executed even
+once.
+
+`engine/execution/readiness.py` replaces all five. Every check now **executes the subsystem it
+names** and reports a SHA-256 digest over what it observed:
+
+| Check | What it actually runs |
+|---|---|
+| `frozen_core_digest_verified` | `verify_frozen_core_digest()` |
+| `executable_build_integrity` | `build_guard.verify_build_integrity()` |
+| `owner_trust_root_exercised` | Ed25519 against the **published RFC 8032 vectors**, not a self round trip |
+| `broker_channel_implementation_exercised` | both channels constructed; both refuse to build without a credential |
+| `broker_specific_normalization_exercised` | both brokers' normalizers on good *and* malformed payloads |
+| `per_capability_conformance_evidence` | the conformance suite run against both channels |
+| `translation_round_trip_proven` | canonical → provider-native → canonical, every order shape, every adapter |
+| `reconciliation_engine_exercised` | agreeing *and* disagreeing fixtures |
+| `market_data_pipeline_exercised` | provider → frozen `closed_bars_only` → frozen `validate_bars` |
+| `data_health_fails_closed` | the health logic against a deliberately month-old series |
+| `session_calendar_exercised` | the calendar at real instants, including its own validity limit |
+| `supervisor_bridge_exercised` | the bridge end to end, plus its escalation-surface check |
+
+`engineering_ready` is `all(record.passed)` and nothing else. A check that raises is recorded as
+**failed**, and a check that is not executed is recorded as missing, so the executed-check
+inventory can never quietly shrink.
+
+### 22.2 The blanket conformance flag is gone
+
+`_ChannelInjectedAdapter(conformance_verified=True)` flipped all fifteen `CORE_CAPABILITIES` to
+SUPPORTED. It was a claim with no content — nothing recorded *which* capability was exercised,
+against *which* interface, in *which* environment, by *which* run — and it was unfalsifiable in the
+dangerous direction.
+
+`engine/execution/conformance.py` replaces it with a **typed, versioned, digest-checked record per
+capability** (`CapabilityEvidence`) and a separate **mandate record** (`MandateEvidence`).
+`resolve()` recomputes the status from the record's own facts every time it is asked:
+
+* a record whose digest does not match its content is not evidence;
+* an unknown schema version, a stale record, a record from another interface and a record from
+  another environment all degrade to UNVERIFIED;
+* a record that was never *exercised* is UNVERIFIED — "we were not allowed to try" is never
+  recorded as "the broker cannot do it";
+* a recorded UNSUPPORTED is a **proven negative** and is preserved, because a broker genuinely
+  cannot do some things.
+
+The concrete result, from the recorded conformance run: Upstox and Alpaca each resolve fifteen
+core capabilities to SUPPORTED, `order_replace` to SUPPORTED only where the endpoint exists, and
+`order_preview` / `streaming_events` to **UNVERIFIED** because this implementation has no probe for
+them. One shared flag could never have produced that.
+
+### 22.3 Upstox is ineligible for this mandate, and conformance cannot override that
+
+Upstox's v3 API is a documented, machine-callable **Indian** market interface. It passes every
+conformance probe here. None of that makes it eligible to trade SPY, QQQ and AAPL.
+
+`MandateEvidence` records which instruments and asset class a broker was *observed* to serve. For
+Upstox that is `IN_EQUITY_CASH`. Mandate compatibility is decided by that record alone; there is no
+code path from "all fifteen capabilities SUPPORTED" to "SPY is tradeable here". The registry,
+the gateway, `require_mandate_compatible()` and `PreflightEvaluator` all consult it, and the test
+suite asserts that adding SUPPORTED records does not move a single mandate verdict.
+
+### 22.4 Translation repaired: canonical economics first, serialization second
+
+`represent_intent` went straight from a raw intent to provider-native fields, and
+`assert_preserves_economic_meaning` was then applied to that payload. That could never work:
+Alpaca spells quantity `qty` **as a string**, Upstox spells side `transaction_type` and
+time-in-force `validity`, and neither carries the canonical names. Rather than weaken the
+economic-meaning check to fit — which would have made it vacuous — the order of operations changed:
+
+1. **The gateway validates a canonical economic representation** — symbol, side, quantity,
+   order_type, time_in_force, limit_price — in `contracts.canonical_economic_representation`,
+   while the order is still broker-neutral. Nothing provider-native exists yet.
+2. **Only then** may the adapter serialize *from that object* into Alpaca/Upstox field names.
+3. **Only then** is the adapter required to decode its own payload back via `economic_view()`, and
+   `assert_preserves_economic_meaning` — **unchanged, not weakened** — compares canonical to
+   canonical.
+
+`tests/test_execution_evidence.py` mutates quantity, side, symbol, order_type, time_in_force and
+price one at a time, in each broker's own field names, and asserts every mutation is refused.
+It also asserts the gateway validates before it serializes, against the source order rather than
+against a comment.
+
+### 22.5 The Supervisor bridge is wired, not merely importable
+
+There was a provider abstraction, a runner, a policy and a `SafetyController`, and nothing
+connecting them to the running system. `engine/execution/supervisor_bridge.py` is that connection:
+a collector that gathers allowlisted, observable facts, a `SanitizedEvidencePacket` that refuses
+anything off the allowlist, and a bridge that runs the provider and writes only to the
+`SafetyController`.
+
+Two guarantees are structural. **One-way:** the bridge exposes no resume, cancel, submit or promote
+method — the test asserts the absence of an escalation surface, not the presence of a check.
+**Outside broker authority:** the collector is handed a `ReadOnlyBrokerObservation` exposing exactly
+four reads and no mutation, so the supervision path has nothing to escalate to.
+
+### 22.6 Market data is a real, fail-closed object
+
+`engine/execution/market_data.py` wraps the **frozen** `providers.get_provider` (no second parsing
+path, no source-kind relabelling), calls the **frozen** `truth_guard.validate_bars`, enforces
+closed 60-minute bars through the **frozen** `market_time.closed_bars_only`, routes every source
+through the provenance guard so a broker execution feed can never become a Truth source, integrates
+the exchange calendar, and fails closed on staleness, cadence, provenance and session. It refuses to
+construct without a provider credential — which is precisely the part that is an owner act.
+
+### 22.7 The execution layer is now under build integrity
+
+`build_guard.CRITICAL_DIRECTORIES` covers `engine/execution/*.py`. Without this,
+`execution/conformance.py` could be edited to answer SUPPORTED unconditionally and every downstream
+evidence digest would still be internally consistent. The build manifest grew from 37 to 64 files.
+
+### 22.8 Corrected stale HMAC references
+
+The owner trust root moved to Ed25519 (RFC 8032); four places still described the live
+authorization or amendment signature as an HMAC tag: `execution/lifecycle.py`,
+`execution/amendment.py` (module docstring and `AmendmentProposal`), and `execution/status.py`. All
+four now describe an Ed25519 signature, domain-separated by purpose. The remaining HMAC mentions
+are deliberate: `engine/supervisor_relay.py` uses an HMAC for its **delivery-acknowledgement
+receipt**, which is a different, live mechanism and is part of the frozen core, and the amendment
+document's comparison table describes the rejected owner-signature design.
+
+### 22.9 Status
+
+**`NOT_COMPLETE`.** The engineering work in items 3 and 4 is done and proven by executed evidence.
+What remains is:
+
+| # | Blocker | Engineering | Owner / external |
+|---|---|---|---|
+| 1 | `owner_public_key_configured` | — | install the owner's Ed25519 public key |
+| 2 | `capital_governor_profile_set` | — | capital, loss, exposure and position values; **none invented** |
+| 3 | `broker_channel_and_conformance` | **done**: real channels, broker-specific normalization, per-capability typed evidence, reconciliation executed, paper/sandbox lifecycle exercised | broker account credentials and the owner's OAuth approval |
+| 4 | `production_market_data` | **done**: production provider wrapper, frozen Truth integration, provenance guard, closed 60-minute bars, calendar/session integration, fail-closed health | provider API key, subscription and real-time entitlement |
+| 5 | `owner_signed_live_authorization` | — | owner decision B, signed |
+| 6 | `constitutional_amendment_applied` | — | re-freezing the frozen core is an owner act |
+
+Nothing in this section requests any of the owner items. No key was generated, no capital value was
+invented, no signature was requested, no broker credential was requested, and no live or real-money
+execution was attempted. `may_transmit_live()` still refuses, and `LIVE_ENABLED` remains owner-only.
