@@ -502,9 +502,14 @@ def permissive_report(order, *, now, authorized_quantity=100) -> PreflightReport
 
 def build_gateway(*, adapter=None, gov=None, stage=Stage.LIVE_LOCKED, boundary=None, registry=None,
                   safety=None):
+    """TEST helper. Production Lifecycle refuses direct LIVE_ENABLED construction."""
     adapter = adapter or FakeAdapter()
+    lifecycle_stage = Stage.LIVE_READY_LOCKED if stage is Stage.LIVE_ENABLED else stage
+    lifecycle = Lifecycle(lifecycle_stage, boundary)
+    if stage is Stage.LIVE_ENABLED:
+        lifecycle._stage = Stage.LIVE_ENABLED
     gateway = UniversalBrokerGateway(adapter=adapter, governor=gov or governor(),
-                                     lifecycle=Lifecycle(stage, boundary), registry=registry,
+                                     lifecycle=lifecycle, registry=registry,
                                      safety=safety)
     return gateway, adapter
 
