@@ -1355,13 +1355,13 @@ def valid_authorization():
                                 environment="TEST_ENV")
 
 
-def test_live_enabled_is_unreachable_even_with_a_valid_owner_authorization():
+def test_live_enabled_is_unreachable_with_authorization_but_no_live_verification():
     with owner_key_configured():
         outcome = Lifecycle(Stage.LIVE_READY_LOCKED).advance(Stage.LIVE_ENABLED,
                                                              actor=Actor.OWNER,
                                                              authorization=valid_authorization())
     assert outcome["advanced"] is False
-    assert outcome["code"] == "LIVE_LOCKED_REFUSAL"
+    assert outcome["code"] == "LIVE_ENABLE_REFUSED_NON_LIVE_AUTHORIZATION"
 
 
 def test_live_enabled_requires_an_authorization_artifact_at_all():
@@ -1370,13 +1370,13 @@ def test_live_enabled_requires_an_authorization_artifact_at_all():
     assert outcome["code"] == "LIVE_ENABLE_REFUSED_NO_AUTHORIZATION"
 
 
-def test_live_authorization_drift_is_refused_even_with_a_releasing_boundary():
+def test_non_live_authorization_is_refused_even_with_a_releasing_boundary():
     with isolated_store(), owner_key_configured():
         outcome = Lifecycle(Stage.LIVE_READY_LOCKED, ReleasingBoundary()).advance(
             Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=valid_authorization(),
             config=approved_config(), governor_profile_hash="a" * 64)
         assert outcome["advanced"] is False
-        assert outcome["code"] == "LIVE_ENABLE_REFUSED_AUTHORIZATION_DRIFT"
+        assert outcome["code"] == "LIVE_ENABLE_REFUSED_NON_LIVE_AUTHORIZATION"
 
 
 def test_default_stage_is_live_locked():

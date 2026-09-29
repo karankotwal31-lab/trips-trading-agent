@@ -390,8 +390,15 @@ class LiveReadOnlyBrokerVerifier:
             raise LiveVerificationError(
                 f"the broker reports no live market-data entitlement: "
                 f"{entitlement.get('detail', 'no detail supplied')}")
+        symbols = {str(symbol).strip().upper()
+                   for symbol in (entitlement.get("symbols") or ()) if str(symbol).strip()}
+        required = set(self._instruments)
+        missing = sorted(required - symbols)
+        if missing:
+            raise LiveVerificationError(
+                f"live market-data entitlement does not cover required instruments {missing}")
         return {"entitled": True, "source": entitlement.get("source"),
-                "symbols": list(entitlement.get("symbols") or [])}
+                "symbols": sorted(symbols), "required": sorted(required)}
 
     # -- run -------------------------------------------------------------
 

@@ -7,7 +7,7 @@
     "docs/styles.css": "7350648528dfad4baf20a04bd996eb0e4d04030d0ba33b79a04febdf27c21b82",
     "engine/ack_escalation.py": "d0eab96744e5fb5c4d4a010fe5aefba0bfefc3c767728d815cf4c9e276f941c8",
     "engine/backtest.py": "b8c0571f191281246254a0f68a807316bc58931710171a512130cd19250f37b1",
-    "engine/build_guard.py": "1b050301c79544b186715b2d952f8bfd10e1d4b734d4cd615d3010772bb265ba",
+    "engine/build_guard.py": "cae0a6ca5e66545e5d315774e4dd974e396593b603d510ed79fd6cdcb6307b23",
     "engine/candle_intelligence.py": "8ab0fbcf12e6fb699827bef77ade95b150274787f8c3024472de994edc998259",
     "engine/capability_registry.json": "1ee873a22df78bda77061ef412da240173cd11b26ec0636677d9120fd374ac62",
     "engine/chaos_diagnostics.py": "765f45e33a9570416c6208c7b921411a6cf7ec6b42a0bfb3c5a71866e60614b9",
@@ -34,9 +34,9 @@
     "engine/execution/gateway.py": "6afbc194a5b96eb4da436956ad662d3774ee63ec78287d77e4d5cb2fb85f5a14",
     "engine/execution/identity.py": "fe275375e7983fc58f9bcf6ea8abd574c4d9bfbfafae5949fc9bb4189ff44128",
     "engine/execution/intent.py": "7e583b393d7a7f1a40658afeaacd779f74699542753fa707954e1514e85324bb",
-    "engine/execution/lifecycle.py": "e1fc38e61d7ae2c1140e670ed2b5e9098980cbd403fb581fb3edb713e0ed36ff",
+    "engine/execution/lifecycle.py": "df768fb5c902a01c34ecfc6eac8dab4e7282817f5ece14d309c63b0dfaf6a8a1",
     "engine/execution/live_path.py": "8aa5303be4f73f06a10963cac3a3cad2b2b74571aa9bdefba69402627989eb10",
-    "engine/execution/live_verification.py": "29ae1398db9aed1ddc9a08f6cfdf6ebce774b515e58f8bec935a601c84f24daf",
+    "engine/execution/live_verification.py": "1bef14b0f589d5cab1140f466d9816030915141116dafde705e14907c90a6b7b",
     "engine/execution/market_data.py": "a3e6c4c75171cd90420f14919f7b664613756eea0afe2339aa386500b338279e",
     "engine/execution/owner_authority.py": "82474e23b10d9487df38a99b715539c4d80fb0844c6f6bea823b1c8ec131c58a",
     "engine/execution/preflight.py": "374bee470b1b6b4c7c23c4a251bf4f4ca8eaffc3340b735b8c08f3b8bea7b08d",
@@ -65,8 +65,9 @@
     "engine/supervisor_bridge.py": "d292f7359bd8eb9a474886ddb51e93b72c2ce810b7e89af03952144994ff1e90",
     "engine/supervisor_counsel.py": "c3b048a95c45a56f8646c8002d8abe03dc1eb3ffaeced4032496aa1dbb970793",
     "engine/supervisor_relay.py": "d38b065edbbe858aaa26ea789bda5b01209991fb8d059760994ae1faeb2e6202",
-    "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e"
+    "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e",
+    "scripts/sign_owner_artifact.py": "3204048c7ee413b465800477165a656429943ed61407c2f302e1f4cb6bd3b438"
   },
-  "manifest_hash": "9ae35421ef347333a23d472d1be9e0251e1a3ad27b6806f396ed4f2480cf8d88",
+  "manifest_hash": "0fd28b3518271e7124d0058eb5b63e03310e165c0993c05df6318fba68717522",
   "schema_version": 2
 }
