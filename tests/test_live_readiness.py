@@ -1146,6 +1146,155 @@ def test_every_read_only_method_the_verifier_requires_is_implemented_by_a_real_c
                 f"can never pass against the only US-equities-capable broker")
 
 
+
+# ---------------------------------------------------------------------------
+# Production bootstrap and independent Truth-data activation evidence
+# ---------------------------------------------------------------------------
+
+
+def test_live_broker_readiness_view_carries_no_market_data_authority():
+    from execution.channels import AlpacaChannel, LiveAccountReadOnlyView, RecordedTransport
+    from execution.readiness import ALPACA_TRANSCRIPTS
+
+    view = LiveAccountReadOnlyView(
+        AlpacaChannel(environment="recorded", api_key="r", api_secret="r",
+                      transport=RecordedTransport(dict(ALPACA_TRANSCRIPTS))))
+    assert not hasattr(view, "market_data_entitlement")
+    assert "market_data_entitlement" not in __import__(
+        "execution.live_verification", fromlist=["READ_ONLY_METHODS"]).READ_ONLY_METHODS
+
+
+def test_dual_source_production_data_evidence_uses_frozen_truth_and_requires_independence():
+    from providers import DemoProvider
+    from execution.market_data import MarketDataError, verify_production_market_data
+
+    bars = DemoProvider().bars("SPY", 240)
+
+    class Provider:
+        def __init__(self, name, family, *, realtime=True):
+            self.identity = type("Identity", (), {
+                "name": name,
+                "source_family": family,
+                "fixed_source_kind": None,
+                "can_request_realtime_entitlement": realtime,
+            })()
+            self.provider_name = name
+            self.source_kind = "real"
+            self.interval = "60min"
+
+        def bars(self, symbol, count=240):
+            return list(bars[-count:])
+
+    primary = Provider("primary-live", "family-a")
+    secondary = Provider("secondary-live", "family-b")
+    evidence = verify_production_market_data(primary, secondary, now=datetime.now(timezone.utc),
+                                             min_bars=3)
+    assert evidence.verified is True
+    assert evidence.primary_family != evidence.secondary_family
+    assert tuple(sorted(evidence.records)) == ("AAPL", "QQQ", "SPY")
+    assert all(record.passed for record in evidence.records.values())
+
+    no_realtime_attestation = Provider("secondary-no-attestation", "family-b", realtime=False)
+    refused = verify_production_market_data(primary, no_realtime_attestation,
+                                            now=datetime.now(timezone.utc), min_bars=3)
+    assert refused.verified is False
+    assert all(not record.passed for record in refused.records.values())
+    assert any("realtime" in record.detail.lower()
+               for record in refused.records.values())
+
+    try:
+        verify_production_market_data(primary, Provider("same-family", "family-a"),
+                                      now=datetime.now(timezone.utc), min_bars=3)
+        raise AssertionError("same-family providers must not count as independent Truth sources")
+    except MarketDataError as exc:
+        assert "independent" in str(exc).lower()
+
+
+def test_live_enable_refuses_broker_evidence_without_independent_market_data_evidence():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    lifecycle = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=_full_live_verification(now))
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=governor_hash)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_MARKET_DATA_VERIFICATION"
+
+
+def test_live_enable_refuses_stale_or_failed_market_data_evidence():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    for evidence in (
+        _full_market_data_verification(now, minutes_old=16),
+        _full_market_data_verification(now, failed_symbol="AAPL"),
+    ):
+        lifecycle = Lifecycle(
+            Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+            live_verification=_full_live_verification(now),
+            market_data_verification=evidence)
+        with base.owner_key_configured():
+            result = lifecycle.advance(
+                Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+                now=now, config=config, governor_profile_hash=governor_hash)
+        assert result["advanced"] is False
+        assert result["code"] == "LIVE_ENABLE_REFUSED_MARKET_DATA_VERIFICATION"
+
+
+def test_live_enable_refuses_market_data_from_the_wrong_configured_provider():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    evidence = _full_market_data_verification(now, primary_provider="some-other-provider")
+    lifecycle = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=_full_live_verification(now),
+        market_data_verification=evidence)
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=governor_hash)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_MARKET_DATA_BINDING"
+    assert "primary" in result["reason"].lower()
+
+
+def test_production_bootstrap_is_offline_and_powerless_by_default():
+    from execution.production_bootstrap import production_bootstrap_status
+
+    report = production_bootstrap_status(environ={})
+    assert report["verify_external_requested"] is False
+    assert report["broker"]["external_request_made"] is False
+    assert report["market_data"]["external_request_made"] is False
+    assert report["constructs_execution_gateway"] is False
+    assert report["transitions_live_enabled"] is False
+    assert report["releases_capital"] is False
+    assert report["places_orders"] is False
+    assert report["external_verification_complete"] is False
+
+
+def test_production_bootstrap_never_self_approves_owner_financial_limits():
+    import json
+
+    import test_execution_layer as base
+    from execution.production_bootstrap import GOVERNOR_ENV, governor_profile_status
+
+    raw = json.dumps({"profile_version": "owner-v1", "profile": base.TEST_PROFILE})
+    report = governor_profile_status({GOVERNOR_ENV: raw})
+    assert report["configured"] is True
+    assert report["valid"] is False
+    assert len(report["computed_profile_hash"]) == 64
+    assert "will not self-approve" in report["reason"]
+
+
+
 if __name__ == "__main__":
     import traceback
 
