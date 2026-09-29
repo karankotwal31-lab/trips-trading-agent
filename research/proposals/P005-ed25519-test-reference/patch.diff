@@ -17,7 +17,7 @@ diff --git a/tests/test_live_readiness.py b/tests/test_live_readiness.py
 @@ -68,6 +68,15 @@
  def test_ed25519_matches_the_published_rfc8032_vector_two():
      private, _ = ed25519.generate_keypair(RFC8032_V2_SEED)
-     assert ed25519.sign(b"\\x72", private).hex().startswith(RFC8032_V2_SIGNATURE_PREFIX)
+     assert ed25519.sign(b"\x72", private).hex().startswith(RFC8032_V2_SIGNATURE_PREFIX)
  
  
 +def test_ed25519_docstring_references_the_existing_vector_suite():
