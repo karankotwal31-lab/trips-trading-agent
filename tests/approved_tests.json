@@ -4,9 +4,9 @@
     "infra/tests/test_cloud_shell.py": "cfbb061eb5c10ab78697fbc526413f3c9ed4f68ad6d76799d595a8b2784a4316",
     "scripts/githooks/pre-push": "86fdb49591f93447acc907b6e792df85c6e17f6087a81ba6695bea32c871cee2",
     "scripts/verify_all.sh": "0fcc8bca5ec97ff1c72f0eab6c5edf9e5d21844e7703d7e6475629e1aa6bdf7d",
-    "tests/run_all_tests.py": "d24461d4a6abd8e8e5eaec6eae0232de165ebca43a2c033122b8823d00b2049a",
+    "tests/run_all_tests.py": "7cdc21c39e9aaa6dea7766ec4887a7e3f8db97267423b0a9588a23a8f8f5f66c",
     "tests/run_tests.py": "db4b312a7cfb9aece465bffdfb695092accb8348d922f93c71890851cf27bc0a",
-    "tests/suite_integrity.py": "6869a875d4a9d42997cec24777661a759fa1b20650cb145ba82328df5efb0095",
+    "tests/suite_integrity.py": "47f7a8756902f427cdf457fd531fa99b6ae4d56668b07c91357282d4701c07f8",
     "tests/test_engine.py": "cd524411a706cd49152b037222cd58e063e41e91a96bf4825cbfd9afc43f18a6",
     "tests/test_execution_evidence.py": "0cc4ffaa7ed839f04d44ae435702070d522a02b3378ea056f15f828e4efc0463",
     "tests/test_execution_layer.py": "cd09bd7c1ef7fffb72db58561fa31116d17cd1f4d7417ba6cd03659762c6a28c",
@@ -14,8 +14,9 @@
     "tests/test_live_gate_amendment.py": "6764e7dadccfebe36cbe066d06c0c77b20d2e8ef447d488af6ad45ff38ac7230",
     "tests/test_live_readiness.py": "24b231674c3ba5ece49632877e11aed0b0011685a79947571aa8aa901c38174d",
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
-    "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3"
+    "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3",
+    "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc"
   },
-  "manifest_hash": "d37c931b1b8a9ac1c7788554d01fbe200f38691601672cc9d58fa5fda8598c62",
+  "manifest_hash": "8a592aa282f5bd7a6062b9689185cc2261054a54dd168b77be63c80a5517dcae",
   "schema_version": 1
 }
