@@ -1,5 +1,9 @@
 # Trip's v0.8 Student Hard Stress Audit
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 ## Verdict
 Student code exists and executes, but it is NOT yet wired into the Trip's runtime cycle or Neon authoritative state.
 
@@ -34,6 +38,6 @@ authoritative persistence, scheduled execution, supervisor visibility, or actual
 
 ## Safety status
 Frozen v0.6 safety/core remains unchanged and its checksum contract still passes.
-Paper-only authority remains unchanged.
+At this historical audit checkpoint, paper-only authority remained unchanged. Current authority and execution-route truth are governed by D1 above.
 
 Student manifest: 9c3e28cbd54d43a8efdfbfa696f9f9d1ffb1720331e5e64f996c22c12fb5781a
