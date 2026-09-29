@@ -1,0 +1,247 @@
+diff --git a/engine/config.json b/engine/config.json
+--- a/engine/config.json
++++ b/engine/config.json
+@@ -26,6 +26,14 @@
+     "max_risk_per_trade_pct": 0.005,
+     "max_daily_loss_pct": 0.015,
+     "max_total_exposure_pct": 0.3,
++    "max_correlated_exposure_pct": 0.2,
++    "correlated_symbol_groups": [
++      [
++        "SPY",
++        "QQQ",
++        "AAPL"
++      ]
++    ],
+     "max_open_positions": 3,
+     "min_signal_score": 0.72,
+     "max_data_age_minutes": 120,
+diff --git a/engine/config_guard.py b/engine/config_guard.py
+--- a/engine/config_guard.py
++++ b/engine/config_guard.py
+@@ -16,6 +16,7 @@ HARD_LIMITS = {
+     "max_risk_per_trade_pct": 0.01,
+     "max_daily_loss_pct": 0.03,
+     "max_total_exposure_pct": 0.50,
++    "max_correlated_exposure_pct": 0.30,
+     "max_open_positions": 5,
+     "min_signal_score_floor": 0.65,
+     "max_data_age_minutes": 240,
+@@ -57,6 +58,26 @@ def validate_config(raw: dict) -> dict:
+     _need(0 < r["max_risk_per_trade_pct"] <= HARD_LIMITS["max_risk_per_trade_pct"], "max_risk_per_trade_pct exceeds hard ceiling")
+     _need(0 < r["max_daily_loss_pct"] <= HARD_LIMITS["max_daily_loss_pct"], "max_daily_loss_pct exceeds hard ceiling")
+     _need(0 < r["max_total_exposure_pct"] <= HARD_LIMITS["max_total_exposure_pct"], "max_total_exposure_pct exceeds hard ceiling")
++    _need(
++        0 < r["max_correlated_exposure_pct"] <= HARD_LIMITS["max_correlated_exposure_pct"],
++        "max_correlated_exposure_pct exceeds hard ceiling")
++    _need(
++        r["max_correlated_exposure_pct"] < r["max_total_exposure_pct"],
++        "max_correlated_exposure_pct must be strictly tighter than total exposure")
++    groups = r.get("correlated_symbol_groups")
++    _need(isinstance(groups, list) and groups, "correlated_symbol_groups must be a non-empty list")
++    seen_correlated = set()
++    for group in groups:
++        _need(isinstance(group, list) and len(group) >= 2,
++              "every correlated symbol group must contain at least two symbols")
++        normalized_group = [str(symbol).strip().upper() for symbol in group]
++        _need(len(set(normalized_group)) == len(normalized_group),
++              "correlated symbol group contains duplicates")
++        _need(set(normalized_group) <= VALIDATED_SYMBOLS,
++              "correlated symbol group contains an unvalidated symbol")
++        _need(not (set(normalized_group) & seen_correlated),
++              "a symbol may belong to only one correlated exposure group")
++        seen_correlated.update(normalized_group)
+     _need(1 <= int(r["max_open_positions"]) <= HARD_LIMITS["max_open_positions"], "max_open_positions exceeds hard ceiling")
+     _need(HARD_LIMITS["min_signal_score_floor"] <= r["min_signal_score"] <= 0.99, "min_signal_score outside allowed range")
+     _need(1 <= r["max_data_age_minutes"] <= HARD_LIMITS["max_data_age_minutes"], "max_data_age_minutes outside hard bounds")
+diff --git a/engine/risk.py b/engine/risk.py
+--- a/engine/risk.py
++++ b/engine/risk.py
+@@ -1,7 +1,7 @@
+ from __future__ import annotations
+ 
+ from dataclasses import asdict, dataclass
+-from typing import Dict, List
++from typing import Dict, List, Mapping
+ 
+ 
+ @dataclass
+@@ -14,6 +14,59 @@ class GateCheck:
+         return asdict(self)
+ 
+ 
++def correlated_group(config: dict, symbol: str) -> tuple[str, ...]:
++    symbol = str(symbol).strip().upper()
++    for raw_group in config["risk"]["correlated_symbol_groups"]:
++        group = tuple(str(item).strip().upper() for item in raw_group)
++        if symbol in group:
++            return group
++    return ()
++
++
++def correlated_exposure(*, config: dict, positions: Mapping[str, object], symbol: str,
++                        prices: Mapping[str, float] | None = None) -> float:
++    """Current long notional in the candidate's approved correlation bucket."""
++    group = set(correlated_group(config, symbol))
++    if not group:
++        return 0.0
++    prices = prices or {}
++    exposure = 0.0
++    for held_symbol, raw in positions.items():
++        if str(held_symbol).strip().upper() not in group:
++            continue
++        if isinstance(raw, Mapping):
++            qty = raw.get("qty", raw.get("quantity", 0))
++            entry = raw.get("entry", 0)
++        else:
++            qty = getattr(raw, "qty", getattr(raw, "quantity", 0))
++            entry = getattr(raw, "entry", 0)
++        try:
++            quantity = max(0.0, float(qty))
++            fallback_price = float(entry)
++            mark = float(prices.get(held_symbol, fallback_price))
++        except (TypeError, ValueError):
++            # Unknown position economics must not create fake headroom.
++            return float("inf")
++        if mark <= 0:
++            return float("inf")
++        exposure += quantity * mark
++    return exposure
++
++
++def correlated_position_size_cap(*, equity: float, entry: float, config: dict,
++                                 positions: Mapping[str, object], symbol: str,
++                                 prices: Mapping[str, float] | None = None) -> int:
++    group = correlated_group(config, symbol)
++    if not group:
++        return 2 ** 31 - 1
++    if equity <= 0 or entry <= 0:
++        return 0
++    used = correlated_exposure(config=config, positions=positions, symbol=symbol, prices=prices)
++    limit = float(equity) * float(config["risk"]["max_correlated_exposure_pct"])
++    remaining = max(0.0, limit - used)
++    return max(0, int(remaining / float(entry)))
++
++
+ def forge_gate(*, config: dict, provider_name: str, bars_count: int, signal_score: float,
+                conflict: bool, stale: bool, positions: Dict[str, dict], pending_entries: Dict[str, dict], symbol: str,
+                daily_pnl: float, equity: float, drawdown_pct: float, assumed_spread_bps: float,
+@@ -34,6 +82,15 @@ def forge_gate(*, config: dict, provider_name: str, bars_count: int, signal_sco
+     checks.append(GateCheck("candle_context", candle_ok, f"candle_context={candle_context}"))
+     reserved_slots = len(positions) + len(pending_entries)
+     checks.append(GateCheck("position_limit", reserved_slots < r["max_open_positions"], f"{reserved_slots}/{r['max_open_positions']} occupied+reserved slots"))
++    group = correlated_group(config, symbol)
++    correlated_used = correlated_exposure(config=config, positions=positions, symbol=symbol)
++    correlated_limit = float(equity) * float(r["max_correlated_exposure_pct"])
++    correlated_ok = (not group) or correlated_used < correlated_limit
++    checks.append(GateCheck(
++        "correlated_exposure",
++        correlated_ok,
++        (f"group={list(group)} used={correlated_used:.2f} limit={correlated_limit:.2f}"
++         if group else "symbol has no configured correlated exposure group")))
+     duplicate = symbol in positions or symbol in pending_entries
+     checks.append(GateCheck("duplicate_position", not duplicate, "No existing/pending position" if not duplicate else "Existing/pending position: no duplicate or averaging down"))
+     checks.append(GateCheck("daily_loss", daily_pnl > -(equity * r["max_daily_loss_pct"]), f"daily_pnl={daily_pnl:.2f}"))
+diff --git a/engine/forge_agent.py b/engine/forge_agent.py
+--- a/engine/forge_agent.py
++++ b/engine/forge_agent.py
+@@ -14,5 +14,5 @@ from market_time import closed_bars_only
+ from providers import Bar, MarketDataError, get_provider
+-from risk import forge_gate, position_size
++from risk import correlated_position_size_cap, forge_gate, position_size
+ from store import (StateStoreError, append_hash_chained_event, cycle_lock, read_runtime,
+                    validate_state, write_json, write_runtime)
+ from strategies import consensus, evaluate, features
+@@ -320,9 +320,13 @@ def _execute_pending(symbol: str, bars: List[Bar], truth: dict, state: dict, le
+         return exposure
+     qty = position_size(state["equity"], entry, stop, cfg["risk"]["max_risk_per_trade_pct"],
+                         cfg["risk"]["max_total_exposure_pct"], exposure)
+-    qty = min(qty, int(state["cash"] / entry) if entry > 0 else 0)
++    correlated_cap = correlated_position_size_cap(
++        equity=state["equity"], entry=entry, config=cfg, positions=state["positions"],
++        symbol=symbol, prices=state.get("last_prices", {}))
++    qty = min(qty, correlated_cap, int(state["cash"] / entry) if entry > 0 else 0)
+     if qty <= 0:
+-        audit.append({"ts": now_iso(), "event": "PENDING_REJECT", "symbol": symbol, "detail": "position size resolved to zero"})
++        audit.append({"ts": now_iso(), "event": "PENDING_REJECT", "symbol": symbol,
++                      "detail": "position size resolved to zero after total/correlated/cash limits"})
+         del state["pending_entries"][symbol]
+         return exposure
+ 
+diff --git a/engine/execution/preflight.py b/engine/execution/preflight.py
+--- a/engine/execution/preflight.py
++++ b/engine/execution/preflight.py
+@@ -13,5 +13,5 @@ from market_time import closed_bars_only
+ from providers import Bar, MarketDataError
+-from risk import forge_gate, position_size
++from risk import correlated_position_size_cap, forge_gate, position_size
+ from strategies import consensus, evaluate, features
+ from truth_guard import apply_cross_source_verification, cross_validate, validate_bars
+ 
+@@ -519,8 +519,13 @@ class PreflightEvaluator:
+                     float(portfolio.equity), float(price), float(stop),
+                     cfg["risk"]["max_risk_per_trade_pct"], cfg["risk"]["max_total_exposure_pct"],
+                     float(portfolio.exposure))
+-                authorized_quantity = min(authorized_quantity,
+-                                          int(float(portfolio.cash) / float(price)) if price > 0 else 0)
++                correlated_cap = correlated_position_size_cap(
++                    equity=float(portfolio.equity), entry=float(price), config=cfg,
++                    positions=dict(getattr(portfolio, "positions", {}) or {}),
++                    symbol=intent.symbol)
++                authorized_quantity = min(
++                    authorized_quantity, correlated_cap,
++                    int(float(portfolio.cash) / float(price)) if price > 0 else 0)
+ 
+             stale = not any(x["name"] == "freshness" and x["passed"] for x in truth.get("checks", []))
+             anomaly = _anomaly(truth)
+diff --git a/tests/test_engine.py b/tests/test_engine.py
+--- a/tests/test_engine.py
++++ b/tests/test_engine.py
+@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "engine"))
+ 
+ from providers import Bar, DemoProvider
+ from strategies import consensus, evaluate, features
+-from risk import forge_gate, position_size
++from risk import (correlated_position_size_cap, forge_gate, position_size)
+ 
+ 
+ def base_cfg():
+@@ -73,6 +74,38 @@ def test_position_size_respects_risk_and_exposure():
+     assert qty * 100 <= 30000
+ 
+ 
++def test_correlated_exposure_caps_combined_position_size():
++    cfg = base_cfg()
++    assert cfg["risk"]["max_correlated_exposure_pct"] < cfg["risk"]["max_total_exposure_pct"]
++    positions = {"SPY": {"entry": 100.0, "qty": 150}}
++    cap = correlated_position_size_cap(
++        equity=100000.0, entry=100.0, config=cfg, positions=positions, symbol="QQQ")
++    assert cap == 50
++
++
++def test_correlated_exposure_gate_blocks_when_bucket_is_full():
++    cfg = base_cfg()
++    gate = forge_gate(
++        config=cfg, provider_name="x", bars_count=100, signal_score=0.9, conflict=False,
++        stale=False, positions={"SPY": {"entry": 100.0, "qty": 200}},
++        pending_entries={}, symbol="QQQ", daily_pnl=0, equity=100000,
++        drawdown_pct=0, assumed_spread_bps=5, cooldown_remaining=0, global_halt=False,
++        agreement_count=2, candle_context="BULLISH_CONTEXT")
++    failed = {x["name"] for x in gate["checks"] if not x["passed"]}
++    assert "correlated_exposure" in failed
++
++
++def test_config_guard_rejects_non_tightening_correlated_limit():
++    from config_guard import ConfigError, validate_config
++    cfg = base_cfg()
++    cfg["risk"]["max_correlated_exposure_pct"] = cfg["risk"]["max_total_exposure_pct"]
++    try:
++        validate_config(cfg)
++        assert False, "correlated cap equal to total exposure must be refused"
++    except ConfigError:
++        pass
++
++
+ def test_gate_fails_conflict_live_and_global_halt():
+     cfg = base_cfg(); cfg["mode"] = "live"
+     gate = forge_gate(config=cfg, provider_name="x", bars_count=100, signal_score=0.9, conflict=True,
