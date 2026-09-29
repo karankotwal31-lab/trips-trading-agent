@@ -20,6 +20,8 @@ from .live_verification import LiveReadOnlyBrokerVerifier, LiveReadOnlyVerificat
 from .market_data import ProductionMarketDataProvider, provider_credential_status
 from .production_data import (ProductionDataVerification,
                               verify_dual_source_production_data)
+from .realtime_providers import (TWELVE_DATA_CREDENTIAL_ENV,
+                                 TwelveDataRealtimeProvider)
 
 BROKER_ENV = "TRIPS_LIVE_BROKER"
 ACCOUNT_ENV = "TRIPS_LIVE_ACCOUNT_ID"
@@ -99,13 +101,25 @@ def build_read_only_broker_verifier(*, environ: Optional[Mapping[str, str]] = No
     raise ProductionBootstrapError(f"no reviewed live bootstrap exists for broker {broker!r}")
 
 
-def build_production_data_providers(*, environ: Optional[Mapping[str, str]] = None
-                                    ) -> Tuple[ProductionMarketDataProvider,
-                                               ProductionMarketDataProvider]:
-    """Construct two explicitly named independent provider adapters.
+def _build_production_provider(name: str, env: Mapping[str, str]) -> Any:
+    """Construct one reviewed realtime provider without relabeling frozen provider identity."""
+    if name == "twelve_data":
+        key = _value(env, TWELVE_DATA_CREDENTIAL_ENV)
+        if not key:
+            raise ProductionBootstrapError(
+                f"Twelve Data live readiness requires {TWELVE_DATA_CREDENTIAL_ENV}")
+        return TwelveDataRealtimeProvider(api_key=key)
+    return ProductionMarketDataProvider(
+        provider_name=name, source_kind="real", environ=env)
 
-    Construction proves only credentials/configuration. Realtime attestation, frozen Truth and
-    cross-source agreement are checked by verify_dual_source_production_data().
+
+def build_production_data_providers(*, environ: Optional[Mapping[str, str]] = None
+                                    ) -> Tuple[Any, Any]:
+    """Construct two explicitly named independent realtime provider adapters.
+
+    Alpha Vantage uses the existing production wrapper. Twelve Data uses the additive reviewed
+    realtime adapter that translates Trip's 60min interval to the provider's documented 1h
+    request while retaining the canonical 60-minute identity presented to frozen Truth.
     """
     env = os.environ if environ is None else environ
     primary_name = _value(env, PRIMARY_PROVIDER_ENV)
@@ -115,10 +129,8 @@ def build_production_data_providers(*, environ: Optional[Mapping[str, str]] = No
             f"{PRIMARY_PROVIDER_ENV} and {SECONDARY_PROVIDER_ENV} are both required")
     if primary_name == secondary_name:
         raise ProductionBootstrapError("primary and secondary market-data providers must differ")
-    primary = ProductionMarketDataProvider(
-        provider_name=primary_name, source_kind="real", environ=env)
-    secondary = ProductionMarketDataProvider(
-        provider_name=secondary_name, source_kind="real", environ=env)
+    primary = _build_production_provider(primary_name, env)
+    secondary = _build_production_provider(secondary_name, env)
     if primary.identity.source_family == secondary.identity.source_family:
         raise ProductionBootstrapError(
             "primary and secondary market data are not independent provider families")
