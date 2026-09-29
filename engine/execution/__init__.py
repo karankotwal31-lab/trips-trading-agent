@@ -239,9 +239,13 @@ from .production_data import (  # noqa: E402
     verify_dual_source_production_data,
 )
 from .realtime_providers import (  # noqa: E402
+    ALPHA_VANTAGE_API_BASE,
+    ALPHA_VANTAGE_CREDENTIAL_ENV,
+    ALPHA_VANTAGE_PROVIDER_INTERVAL,
     TWELVE_DATA_API_BASE,
     TWELVE_DATA_CREDENTIAL_ENV,
     TWELVE_DATA_PROVIDER_INTERVAL,
+    AlphaVantageRealtimeProvider,
     TwelveDataRealtimeProvider,
 )
 from .production_runtime import (  # noqa: E402
@@ -252,6 +256,7 @@ from .production_runtime import (  # noqa: E402
     PRIMARY_PROVIDER_ENV,
     SECONDARY_PROVIDER_ENV,
     SUPPORTED_LIVE_BROKERS,
+    SUPPORTED_REALTIME_DATA_PROVIDERS,
     ExternalReadinessArtifacts,
     ProductionBootstrapError,
     build_production_data_providers,
@@ -359,6 +364,8 @@ __all__ = [
     "ProductionMarketDataProvider", "ProductionSupervisorBridge", "ProviderCredentialMissing",
     "ProductionDataSymbolRecord", "ProductionDataVerification",
     "ProductionDataVerificationError", "EVIDENCE_KIND_PRODUCTION_DATA",
+    "AlphaVantageRealtimeProvider", "ALPHA_VANTAGE_API_BASE",
+    "ALPHA_VANTAGE_CREDENTIAL_ENV", "ALPHA_VANTAGE_PROVIDER_INTERVAL",
     "TwelveDataRealtimeProvider", "TWELVE_DATA_API_BASE",
     "TWELVE_DATA_CREDENTIAL_ENV", "TWELVE_DATA_PROVIDER_INTERVAL",
     "PRODUCTION_DATA_SCHEMA_VERSION", "PRODUCTION_DATA_REQUIRED_SYMBOLS",
@@ -374,6 +381,7 @@ __all__ = [
     "collect_external_readiness_artifacts", "external_dependency_status",
     "external_readiness_report", "ACCOUNT_ENV", "ALPACA_KEY_ENV", "ALPACA_SECRET_ENV",
     "BROKER_ENV", "PRIMARY_PROVIDER_ENV", "SECONDARY_PROVIDER_ENV", "SUPPORTED_LIVE_BROKERS",
+    "SUPPORTED_REALTIME_DATA_PROVIDERS",
     "AUTHORIZED", "ALLOWED_TRANSITIONS", "APPROVED_BAR_INTERVAL", "APPROVED_INSTRUMENT_SCOPE",
     "AUTONOMOUS", "Actor", "AuthorityGate", "AutonomousAuthorityIncrease", "BLOCKED",
     "BrokerAccount", "BrokerAdapter", "BrokerAutomationUnsupported", "BrokerHealth",
