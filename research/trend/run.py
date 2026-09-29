@@ -5,14 +5,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from research.trend.core import build_backtest_report, canonical_json, load_owner_data, sha256_file
 from research.trend.gate import evaluate_report
 
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def _read_json(path: Path) -> dict:
