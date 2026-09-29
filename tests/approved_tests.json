@@ -18,8 +18,8 @@
     "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc",
     "tests/test_production_bootstrap.py": "d406b398af1381cada8575f074edc60301c2cbefdf1ca1049a122c36e4e3f9ab",
     "tests/test_commodity_readiness.py": "13168f172a09729484f214311c8e17d6e7b9e3e37b70637383f90c0492feb5d6",
-    "tests/test_empire_audit_40000_five_scenarios.py": "8b74264aaf32ceb0a989d36b5befcaa8013baad33517f60100636f7bd1f3e5ce"
+    "tests/test_empire_audit_40000_five_scenarios.py": "1a2c0314f4b9ce824c97cb7d5f3241e391865d747086186c7298286566ce5d77"
   },
-  "manifest_hash": "03153c2c7d5768727095d12ba92a234e1a68c56feef2c4e6ce98b2d2028fa25f",
+  "manifest_hash": "c07be645f696601492142553e9a1cb0d2a565cc6022913d6def4c4f0d7e6945e",
   "schema_version": 1
 }
