@@ -20,8 +20,13 @@ No config fingerprint change is proposed.
 1. Apply patch.diff on a clean reviewed branch.
 2. Run the targeted parity test or python tests/test_engine.py.
 3. Review changed synthetic/backtest outputs without tuning thresholds to improve them.
-4. Regenerate infra/core_v06.sha256 yourself using the repository's exact existing file order after
-   reviewing the backtest change. Do not accept a partial hash list.
+4. Regenerate `infra/core_v06.sha256` yourself, preserving the exact existing path order:
+
+   ```sh
+   tmp="$(mktemp)" && awk '{print $2}' infra/core_v06.sha256 | xargs sha256sum > "$tmp" && mv "$tmp" infra/core_v06.sha256
+   ```
+
+   Run this only after reviewing the backtest change. Do not accept a partial hash list.
 5. Run yourself: PYTHONPATH=engine python engine/approve_build.py
 6. Run yourself: python infra/approve_infra.py
 7. Run yourself: python tests/suite_integrity.py --approve
