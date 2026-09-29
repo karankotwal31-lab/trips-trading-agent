@@ -24,6 +24,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      verify_external:
+        description: "Run read-only verification against configured live broker/data providers"
+        required: true
+        type: boolean
+        default: false
   schedule:
     # Off the hour, and daily. A readiness report that is only ever computed on a human's push is
     # not a health check.
@@ -58,6 +64,46 @@ jobs:
 
       - name: Run Trip's safety gate
         run: sh ./scripts/verify_all.sh
+
+      - name: Production bootstrap (offline inspection only)
+        run: PYTHONPATH=engine python scripts/live_bootstrap.py > production_bootstrap.json
+
+      - name: Assert offline bootstrap cannot release capital or contact external systems
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          with open("production_bootstrap.json") as handle:
+              report = json.load(handle)
+          problems = []
+          if report.get("releases_capital") is not False:
+              problems.append("bootstrap must never release capital")
+          if report.get("places_orders") is not False:
+              problems.append("bootstrap must never place orders")
+          if report.get("constructs_execution_gateway") is not False:
+              problems.append("bootstrap must never construct the execution gateway")
+          if report.get("verify_external_requested") is not False:
+              problems.append("ordinary CI must stay offline")
+          for section in ("broker", "market_data"):
+              if report.get(section, {}).get("external_request_made") is True:
+                  problems.append(f"offline CI unexpectedly contacted {section}")
+          if problems:
+              raise SystemExit("; ".join(problems))
+          PY
+
+      - name: External production verification (manual, read-only)
+        if: github.event_name == 'workflow_dispatch' && inputs.verify_external
+        env:
+          TRIPS_LIVE_BROKER: alpaca
+          TRIPS_LIVE_ACCOUNT_ID: ${{ secrets.TRIPS_LIVE_ACCOUNT_ID }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+          TRIPS_PRIMARY_DATA_PROVIDER: alpha_vantage
+          TRIPS_SECONDARY_DATA_PROVIDER: twelve_data
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: PYTHONPATH=engine python scripts/live_bootstrap.py --verify-external --strict > production_external.json
 
       - name: Live-readiness report (read-only, submits no order)
         run: PYTHONPATH=engine python -m execution.status > readiness.json
