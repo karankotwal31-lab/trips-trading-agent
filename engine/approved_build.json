@@ -34,9 +34,9 @@
     "engine/execution/gateway.py": "6afbc194a5b96eb4da436956ad662d3774ee63ec78287d77e4d5cb2fb85f5a14",
     "engine/execution/identity.py": "fe275375e7983fc58f9bcf6ea8abd574c4d9bfbfafae5949fc9bb4189ff44128",
     "engine/execution/intent.py": "7e583b393d7a7f1a40658afeaacd779f74699542753fa707954e1514e85324bb",
-    "engine/execution/lifecycle.py": "e1fc38e61d7ae2c1140e670ed2b5e9098980cbd403fb581fb3edb713e0ed36ff",
+    "engine/execution/lifecycle.py": "df768fb5c902a01c34ecfc6eac8dab4e7282817f5ece14d309c63b0dfaf6a8a1",
     "engine/execution/live_path.py": "8aa5303be4f73f06a10963cac3a3cad2b2b74571aa9bdefba69402627989eb10",
-    "engine/execution/live_verification.py": "29ae1398db9aed1ddc9a08f6cfdf6ebce774b515e58f8bec935a601c84f24daf",
+    "engine/execution/live_verification.py": "1bef14b0f589d5cab1140f466d9816030915141116dafde705e14907c90a6b7b",
     "engine/execution/market_data.py": "a3e6c4c75171cd90420f14919f7b664613756eea0afe2339aa386500b338279e",
     "engine/execution/owner_authority.py": "82474e23b10d9487df38a99b715539c4d80fb0844c6f6bea823b1c8ec131c58a",
     "engine/execution/preflight.py": "374bee470b1b6b4c7c23c4a251bf4f4ca8eaffc3340b735b8c08f3b8bea7b08d",
@@ -67,6 +67,6 @@
     "engine/supervisor_relay.py": "d38b065edbbe858aaa26ea789bda5b01209991fb8d059760994ae1faeb2e6202",
     "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e"
   },
-  "manifest_hash": "9ae35421ef347333a23d472d1be9e0251e1a3ad27b6806f396ed4f2480cf8d88",
+  "manifest_hash": "37382214d00f674b6cc1507e5d478fa1edc0b24cacf659d025ad1fa9f69c0095",
   "schema_version": 2
 }
