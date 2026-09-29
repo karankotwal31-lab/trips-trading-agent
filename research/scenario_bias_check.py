@@ -11,8 +11,13 @@ import json
 import math
 import random
 import statistics
+import sys
 from datetime import date, timedelta
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from research.trend.core import DailyBar, simulate_strategy
 
