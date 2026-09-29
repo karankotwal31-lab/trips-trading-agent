@@ -1,12 +1,14 @@
 {
+  "schema_version": 1,
   "files": {
     ".github/workflows/trips-safety-suites.yml": "c5e160323cd7d488933490c8881b358a93a64bf24e2fda3435adb437b39d156b",
     "infra/tests/test_cloud_shell.py": "cfbb061eb5c10ab78697fbc526413f3c9ed4f68ad6d76799d595a8b2784a4316",
     "scripts/githooks/pre-push": "86fdb49591f93447acc907b6e792df85c6e17f6087a81ba6695bea32c871cee2",
     "scripts/verify_all.sh": "0fcc8bca5ec97ff1c72f0eab6c5edf9e5d21844e7703d7e6475629e1aa6bdf7d",
-    "tests/run_all_tests.py": "7cdc21c39e9aaa6dea7766ec4887a7e3f8db97267423b0a9588a23a8f8f5f66c",
+    "tests/run_all_tests.py": "2aa58acb0202a02b953cfe0067da1c8ce0663ff73a246235d00f0675ede81852",
     "tests/run_tests.py": "db4b312a7cfb9aece465bffdfb695092accb8348d922f93c71890851cf27bc0a",
-    "tests/suite_integrity.py": "47f7a8756902f427cdf457fd531fa99b6ae4d56668b07c91357282d4701c07f8",
+    "tests/suite_integrity.py": "afdbf8df73525cb61b0f15f845efc1f171db3350a504143ac24bf2498ae2c666",
+    "tests/test_commodity_readiness.py": "b1656e0e1e3325c02a5181d1c30362c67ccee402161e4694a8b1490354b26b75",
     "tests/test_engine.py": "cd524411a706cd49152b037222cd58e063e41e91a96bf4825cbfd9afc43f18a6",
     "tests/test_execution_evidence.py": "0cc4ffaa7ed839f04d44ae435702070d522a02b3378ea056f15f828e4efc0463",
     "tests/test_execution_layer.py": "cd09bd7c1ef7fffb72db58561fa31116d17cd1f4d7417ba6cd03659762c6a28c",
@@ -17,6 +19,5 @@
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3",
     "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc"
   },
-  "manifest_hash": "194fd0e4f811b33832224fc78959dc42e10e47606570fb45da6d852891c6825f",
-  "schema_version": 1
+  "manifest_hash": "a46e5f3ac40b8ad017cabdc758cf4f24fbcc43bd1322fd28be45b638548cb1b3"
 }
