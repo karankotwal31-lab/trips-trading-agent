@@ -1,8 +1,12 @@
 # Trip's v0.6 Control Center — Hardening Report
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 ## Release verdict
 
-**Core / dashboard checkpoint: PASS within the deliberately narrow paper-only scope.**
+**Historical v0.6 core / dashboard checkpoint: PASS within the deliberately narrow paper-only scope that existed at that release.**
 
 The dashboard is an operator-observability surface only. It cannot submit trades, mutate risk, modify strategy, acknowledge supervisor events, change symbols/providers or alter the Constitution.
 
@@ -55,4 +59,4 @@ The system is not called “perfect.” Unknown future failures cannot be proven
 - authenticated hosted supervisor transport and acknowledgement bridge;
 - broader incident-response/backup restoration drills on the eventual production infrastructure.
 
-Until those are satisfied, Trip's remains a **hardened autonomous paper-research core with a verified read-only control center**.
+At that v0.6 checkpoint, Trip's remained a **hardened autonomous paper-research core with a verified read-only control center**. Current authority and execution-route truth are governed by D1 above.
