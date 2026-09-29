@@ -259,6 +259,10 @@ class FakeAdapter(BrokerAdapter):
                               is CapabilityStatus.UNSUPPORTED))
         self.submitted = []
         self.cancelled = []
+        #: Every permit this double was handed. A real channel refuses without one; the double
+        #: records it so a test can assert the first mutation happened under a permit.
+        self.permits = []
+        self.cancel_permits = []
 
     @property
     def conformance_evidence(self):
@@ -305,16 +309,18 @@ class FakeAdapter(BrokerAdapter):
         """TEST DOUBLE decodes its own payload. It is the canonical shape already."""
         return dict(representation)
 
-    def submit_order(self, *, client_order_id, representation):
+    def submit_order(self, *, client_order_id, representation, permit=None):
         if self._submit_exception is not None:
             self.submitted.append(client_order_id)
             raise self._submit_exception
         self.submitted.append(client_order_id)
+        self.permits.append(permit)
         return {"broker_order_id": "BO-1", "client_order_id": client_order_id,
                 "state": ExecutionState.BROKER_ACKNOWLEDGED.value}
 
-    def cancel_order(self, *, broker_order_id, reason):
+    def cancel_order(self, *, broker_order_id, reason, permit=None):
         self.cancelled.append((broker_order_id, reason))
+        self.cancel_permits.append(permit)
         return {"broker_order_id": broker_order_id, "state": ExecutionState.CANCELLED.value}
 
 
@@ -1329,7 +1335,7 @@ def test_illegal_canonical_transitions_are_rejected():
 def test_no_component_other_than_the_owner_can_promote():
     for actor in (Actor.STUDENT, Actor.EVOLUTION, Actor.STRATEGY, Actor.GUARDIAN,
                   Actor.SUPERVISOR, Actor.BROKER, Actor.TESTS):
-        outcome = Lifecycle(Stage.PAPER).advance(Stage.LIVE_LOCKED, actor=actor)
+        outcome = Lifecycle(Stage.SHADOW).advance(Stage.LIVE_LOCKED, actor=actor)
         assert outcome["advanced"] is False
         assert outcome["code"] == "PROMOTION_REFUSED_NOT_OWNER"
 

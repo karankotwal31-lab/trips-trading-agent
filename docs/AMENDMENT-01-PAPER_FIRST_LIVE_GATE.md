@@ -689,3 +689,197 @@ What remains is:
 Nothing in this section requests any of the owner items. No key was generated, no capital value was
 invented, no signature was requested, no broker credential was requested, and no live or real-money
 execution was attempted. `may_transmit_live()` still refuses, and `LIVE_ENABLED` remains owner-only.
+
+---
+
+## 23. Trip's is live-money-only. Paper trading is not a prerequisite and never was evidence.
+
+This section supersedes §21 and §22.9's classification, and it supersedes anything in this
+document that treated a paper or sandbox broker environment as something to be completed before
+live trading.
+
+### 23.1 What changed, and what it is not
+
+The stage order is now:
+
+```
+RESEARCH -> BACKTEST -> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED
+```
+
+`Stage.PAPER` no longer exists. `ALLOWED_TRANSITIONS[SHADOW]` is `(LIVE_LOCKED,)`, so there is no
+paper waypoint even to pass through. Paper and sandbox broker execution are not prerequisites, not
+achievements, and they appear in neither the engineering column nor the owner column of any
+classified blocker — because a thing that is not required cannot be a thing done.
+
+This is **not** the deletion of verification coverage. Coverage is preserved; what it measures
+changed. Two engineering checks were added and two requirements were renamed, and both of the
+renamed requirements now demand *more* evidence than the paper conformance they replace.
+
+### 23.2 Recorded fixtures are engineering tests, not trading environments
+
+`RecordedTransport` and the recorded transcripts in `execution/readiness.py` remain, and they
+remain the only way to execute conformance in a repository that must not hold a credential. What
+they are is now stated rather than implied:
+
+* a recorded transcript is not a trading environment, holds no account, and creates no portfolio
+  state;
+* evidence produced through it is stamped `RECORDED_CONTRACT_CONFORMANCE`;
+* it proves **implementation behaviour** — that the adapter serializes, parses and normalizes
+  correctly against a fixed answer;
+* it cannot expire, drift, or say anything about a live account;
+* it is mechanically prevented from being read back as live evidence (below).
+
+The separation is enforced, not editorial. `CapabilityEvidence` and `MandateEvidence` carry an
+`evidence_kind`, and `resolve(environment="live")` degrades any `RECORDED_CONTRACT_CONFORMANCE`
+record to `UNVERIFIED` — which fails closed. Two executed checks
+(`recorded_evidence_is_not_live_evidence`, and the new coverage assertions in
+`tests/test_execution_evidence.py`) assert exactly that refusal, so removing paper trading cannot
+quietly substitute fixtures for the live verification it removed.
+
+### 23.3 Broker validation before LIVE_ENABLED is read-only against the real account
+
+`execution/live_verification.py` replaces paper conformance with
+`LIVE_READ_ONLY_BROKER_VERIFICATION`: twelve named, typed, digest-checked checks against the
+**intended real live brokerage account** —
+
+1. `authenticate_legitimately`
+2. `verify_broker_identity`
+3. `verify_exact_account`
+4. `verify_us_equity_permissions`
+5. `verify_required_instruments_available` (SPY, QQQ, AAPL)
+6. `retrieve_balances`
+7. `retrieve_positions`
+8. `retrieve_open_and_recent_orders`
+9. `verify_broker_clock`
+10. `verify_account_restrictions`
+11. `verify_rate_limit_and_error_behaviour`
+12. `verify_live_market_data_entitlement`
+
+**No check submits an order.** There is no probe here that places, cancels or modifies anything,
+including in a harmless account and including to measure latency.
+
+Three properties make "read-only" a property of the code rather than a promise in a comment:
+
+* `ReadOnlyBrokerAccount` is a `Protocol` with ten read methods and no `submit`, no `cancel` and
+  no `replace`. `LiveAccountReadOnlyView` wraps a real channel and exposes only those ten.
+* `assert_non_mutating()` runs on every verification and refuses any target whose surface contains
+  a mutating method — so adding `submit` to a channel is a **test failure**, not a surprise.
+* Check 11 reads the transport's declared error contract out of its own metadata rather than
+  provoking a rate limit or sending a deliberately bad request to a live account. Provoking an
+  error against a live account is an outage risk and, for a rejected order, a mutation attempt.
+
+`LiveReadOnlyVerification` refuses any environment other than `live`, so a recorded fixture cannot
+be reported as live read-only verification. `verified` is `all twelve passed`; anything less is
+`UNVERIFIED` and releases nothing. `to_dict()` carries `releases_capital: False` permanently.
+
+Neither evidence kind releases capital. Capital is released only by a verified owner-signed
+amendment plus a separately signed live authorization.
+
+### 23.4 No paper endpoint, no paper credential, no runtime fallback
+
+Removed, not deprecated: `UPSTOX_SANDBOX_TRADE_BASE` and `ALPACA_PAPER_BASE` no longer exist.
+`LIVE_ENVIRONMENTS = ("live", "recorded")`; both channels and both adapters default to `live` and
+refuse `paper` and `sandbox` at construction. `PERMITTED_MUTATION_ENVIRONMENTS = ("live",)`.
+
+The environments are chosen at construction and nothing can switch one at runtime. `recorded` is
+not a fallback — it is a different object with a non-routable base URL
+(`https://recorded.invalid`) whose transport never opens a socket, and its mutation probes are
+refused unless explicitly enabled on a recorded fixture. There is no paper credential to leak
+because there is no paper endpoint to present one to.
+
+### 23.5 The first mutation is a permit, and it is minted in exactly one place
+
+`LiveMutationPermit` (in `execution/contracts.py`) is the one artifact that lets a channel place or
+cancel a real order. It is bound to one broker, one account, one stage and one authorization key
+id, and `check()` refuses the wrong stage, the wrong broker or the wrong account — so it cannot be
+reused or widened.
+
+It is minted in `UniversalBrokerGateway.submit()`, immediately before `submit_order()`, from the
+boundary verdict that `may_transmit_live()` has just produced. It is never a caller argument:
+`submit()` has no `permit` parameter. `request_cancel()` mints one only when the same gate permits.
+
+Consequence: readiness verification, conformance, reconciliation, the supervisor bridge, preflight
+and every other read path in this system run *without* a permit and therefore **cannot** mutate an
+account, even by mistake. `MUTATION_REQUIRES_STAGE = "LIVE_ENABLED"` — the first mutation of a real
+brokerage account may occur only after that stage.
+
+### 23.6 The canonical live path, as data
+
+`execution/live_path.py` writes the route down rather than leaving it implicit in call order:
+
+```
+LIVE market data -> Truth -> Strategy -> Risk -> Capital Governor -> Constitution
+-> immutable ExecutionIntent -> Execution Authority Gate -> UniversalBrokerGateway
+-> verified LIVE BrokerAdapter -> LIVE broker account -> real broker execution -> reconciliation
+```
+
+`CANONICAL_LIVE_PATH` is a 13-tuple; `assert_canonical_live_route()` refuses anything reordered,
+dropped or inserted; the test suite asserts the tuple matches the mandated one exactly.
+`assert_no_non_live_environment()` refuses a demo, delayed, paper, sandbox or simulated feed or
+broker, so there is no runtime fallback between environments. Preflight consults it on every
+evaluation, so a non-live environment fails `correct_environment` rather than passing quietly.
+
+### 23.7 Autonomy after activation, and the limit it may not move
+
+After `LIVE_ENABLED`, normal valid decisions execute **without per-order human approval** — that
+is the point of the system — strictly inside the owner-signed Capital Governor profile and the
+frozen deterministic guardrails. `assert_no_autonomous_authority_increase()` is the
+machine-checkable statement of the boundary: an autonomous component may tighten any limit at any
+time and may never raise one, and it is measured against the **frozen hard ceilings**, not against
+the governor profile, so an over-generous profile cannot become the yardstick that measures its
+own permissiveness.
+
+### 23.8 The workflow: verification coverage preserved, trading coverage removed
+
+`.github/workflows/trips-cloud-paper.yml` is **retired**. It is not renamed and not repointed: the
+file is deleted, `infra/approve_infra.py` no longer fingerprints it, and
+`infra/tests/test_cloud_shell.py` asserts its absence.
+
+It is replaced by **`.github/workflows/trips-live-readiness.yml`**, which performs only
+non-mutating validation and runs on push, pull request, manual dispatch and daily:
+
+* `sha256sum -c infra/core_v06.sha256` — the frozen v0.6 core, carried over verbatim;
+* `python infra/verify_infra.py` — the approved infrastructure manifest, carried over verbatim;
+* `python -m pip install -r infra/requirements-cloud.txt` — the cloud adapter dependency, carried over;
+* `sh ./scripts/verify_all.sh` — the full safety gate, which is a superset of the old checks;
+* `python -m execution.status` — the live-readiness report, plus an assertion that it never
+  observes `LIVE_ENABLED` and never observes permitted live transmission.
+
+**No live order may be submitted merely as a CI test**, and nothing in that workflow can: it
+carries no broker credential, no provider credential and no database credential, and a test
+asserts that none of those secret names appear in the file at all. The one thing it deliberately
+does *not* claim is live broker compatibility: with no live credential present, that is reported
+as `NOT_VERIFIED` and remains an owner item.
+
+### 23.9 Status: `LIVE_READY_LOCKED`
+
+Every engineering check passes. What remains is entirely owner-supplied:
+
+| # | Blocker | Status | Owner act |
+|---|---|---|---|
+| 1 | `owner_public_key_configured` | owner | install the owner's Ed25519 public key |
+| 2 | `capital_governor_profile_set` | owner | capital, loss, exposure and position values; **none invented** |
+| 3 | `broker_channel_and_conformance` | engineering **done** | `LIVE_READ_ONLY_BROKER_VERIFICATION` needs the live account credentials and the owner's OAuth approval for that account |
+| 4 | `production_market_data` | engineering **done** | provider API key, subscription and real-time entitlement |
+| 5 | `owner_signed_live_authorization` | owner | owner decision B, signed |
+| 6 | `constitutional_amendment_applied` | owner | re-freezing the frozen core is an owner act |
+
+**The build holds at `LIVE_READY_LOCKED`.** That is the ceiling autonomous work may reach, and it
+grants nothing: `may_transmit_live()` still refuses, `LIVE_ENABLED` remains owner-only, and
+`MUTATION_REQUIRES_STAGE` is `LIVE_ENABLED`.
+
+`LIVE_ENABLED` continues to require all eleven of: a pinned Ed25519 owner trust root; an
+owner-signed Capital Governor profile; an approved constitutional amendment covering **all three**
+frozen blockers (`CONSTITUTION_PROHIBITION_RULE`, `CONFIG_GUARD_MODE_RESTRICTION`,
+`RISK_MODE_RESTRICTION`); exact approved build and config identities; an owner-signed live
+authorization; a verified real live broker account; verified live market data; clean
+reconciliation; healthy Truth/Risk/Capital/Constitution gates; no halt; and no unresolved order
+ambiguity. `LIVE_ENABLED_REQUIREMENTS` holds them as a named tuple, and the test suite asserts the
+set.
+
+### 23.10 What this pass did not do
+
+No frozen file was modified; `sha256sum -c infra/core_v06.sha256` still verifies 16/16. No owner key
+was generated or requested. No capital value was invented. No signature was requested. No broker
+credential was requested. **No live or real-money order was placed, and none was submitted as a CI
+test.**

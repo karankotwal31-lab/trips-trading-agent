@@ -44,9 +44,20 @@ from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, T
 from .contracts import (APPROVED_INSTRUMENT_SCOPE, CORE_CAPABILITIES,  # noqa: E402
                         OPTIONAL_CAPABILITIES, CapabilityMatrix, CapabilityStatus,
                         ExecutionLayerError, canonical_json)
+from .live_verification import EVIDENCE_KIND_LIVE_READ_ONLY, EVIDENCE_KIND_RECORDED  # noqa: E402
 
 #: Bumped whenever the shape or meaning of a record changes. An unknown version is not evidence.
 CONFORMANCE_EVIDENCE_VERSION = 1
+
+#: What a conformance record made through this suite actually proves.
+#:
+#: A conformance run replays the real channel, the real URL construction and the real
+#: normalization against a recorded broker answer. That is genuine, valuable engineering evidence -
+#: and it is evidence of exactly one thing: **implementation behaviour**. It is stamped
+#: ``RECORDED_CONTRACT_CONFORMANCE`` so it can never be read back as evidence about a live
+#: brokerage account, which requires ``LIVE_READ_ONLY_BROKER_VERIFICATION`` instead
+#: (see :mod:`execution.live_verification`). Neither releases capital.
+EVIDENCE_KIND = EVIDENCE_KIND_RECORDED
 
 #: The deployment's instrument mandate. Taken from the approved instrument scope constant, never
 #: restated here, so there is no second authority.
@@ -87,13 +98,17 @@ class CapabilityEvidence:
     observed_at: str
     observation: Mapping[str, Any] = field(default_factory=dict)
     schema_version: int = CONFORMANCE_EVIDENCE_VERSION
+    evidence_kind: str = EVIDENCE_KIND
 
     def __post_init__(self) -> None:
         if not str(self.capability).strip():
             raise ConformanceEvidenceError("conformance evidence requires a capability name")
-        for name in ("interface", "environment", "observed_by"):
+        for name in ("interface", "environment", "observed_by", "evidence_kind"):
             if not str(getattr(self, name)).strip():
                 raise ConformanceEvidenceError(f"conformance evidence requires {name}")
+        if self.evidence_kind not in (EVIDENCE_KIND, EVIDENCE_KIND_LIVE_READ_ONLY):
+            raise ConformanceEvidenceError(
+                f"unknown conformance evidence kind {self.evidence_kind!r}")
         _aware(self.observed_at, "observed_at")
         object.__setattr__(self, "status",
                            self.status if isinstance(self.status, CapabilityStatus)
@@ -115,6 +130,7 @@ class CapabilityEvidence:
             "observed_at": self.observed_at,
             "observation": dict(self.observation),
             "schema_version": self.schema_version,
+            "evidence_kind": EVIDENCE_KIND,
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -127,7 +143,7 @@ class CapabilityEvidence:
         try:
             body = {name: payload[name] for name in (
                 "capability", "status", "interface", "environment", "observed_by",
-                "observed_at", "observation", "schema_version")}
+                "observed_at", "observation", "schema_version", "evidence_kind")}
         except KeyError as exc:
             raise ConformanceEvidenceError(f"conformance evidence is missing {exc}") from exc
         record = cls(**body)
@@ -149,6 +165,15 @@ class CapabilityEvidence:
             return CapabilityStatus.UNVERIFIED, (
                 f"evidence schema v{self.schema_version} is not the supported "
                 f"v{CONFORMANCE_EVIDENCE_VERSION}")
+        if self.evidence_kind != EVIDENCE_KIND:
+            return CapabilityStatus.UNVERIFIED, (
+                f"evidence kind {self.evidence_kind!r} is not {EVIDENCE_KIND!r}")
+        if environment == "live" and EVIDENCE_KIND != EVIDENCE_KIND_LIVE_READ_ONLY:
+            # The distinction is the whole point of removing paper trading: a recorded answer is
+            # not evidence about a real account, and asking for it as such must fail closed.
+            return CapabilityStatus.UNVERIFIED, (
+                f"{EVIDENCE_KIND} proves implementation behaviour only; live compatibility "
+                f"requires {EVIDENCE_KIND_LIVE_READ_ONLY}")
         if interface is not None and self.interface != interface:
             return CapabilityStatus.UNVERIFIED, (
                 f"observed on interface {self.interface!r}, not {interface!r}")
@@ -190,10 +215,14 @@ class MandateEvidence:
     observed_at: str
     observation: Mapping[str, Any] = field(default_factory=dict)
     schema_version: int = CONFORMANCE_EVIDENCE_VERSION
+    evidence_kind: str = EVIDENCE_KIND
 
     def __post_init__(self) -> None:
         if not str(self.broker_id).strip() or not str(self.mandate_id).strip():
             raise ConformanceEvidenceError("mandate evidence requires a broker and a mandate")
+        if self.evidence_kind not in (EVIDENCE_KIND, EVIDENCE_KIND_LIVE_READ_ONLY):
+            raise ConformanceEvidenceError(
+                f"unknown mandate evidence kind {self.evidence_kind!r}")
         object.__setattr__(self, "instruments",
                            tuple(sorted({str(symbol).strip().upper() for symbol in self.instruments})))
         _aware(self.observed_at, "observed_at")
@@ -213,6 +242,7 @@ class MandateEvidence:
             "observed_at": self.observed_at,
             "observation": dict(self.observation),
             "schema_version": self.schema_version,
+            "evidence_kind": self.evidence_kind,
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -225,7 +255,7 @@ class MandateEvidence:
         try:
             body = {name: payload[name] for name in (
                 "broker_id", "mandate_id", "instruments", "asset_class", "environment",
-                "observed_by", "observed_at", "observation", "schema_version")}
+                "observed_by", "observed_at", "observation", "schema_version", "evidence_kind")}
         except KeyError as exc:
             raise ConformanceEvidenceError(f"mandate evidence is missing {exc}") from exc
         record = cls(**body)
@@ -239,6 +269,10 @@ class MandateEvidence:
         now = now or datetime.now(timezone.utc)
         if self.schema_version != CONFORMANCE_EVIDENCE_VERSION:
             return False, (f"mandate evidence schema v{self.schema_version} is not supported",)
+        if environment == "live" and self.evidence_kind != EVIDENCE_KIND_LIVE_READ_ONLY:
+            return False, (f"{self.evidence_kind} proves implementation behaviour only; which "
+                           f"instruments a REAL account may trade requires "
+                           f"{EVIDENCE_KIND_LIVE_READ_ONLY}",)
         if environment is not None and self.environment != environment:
             return False, (f"mandate evidence is from environment {self.environment!r}, "
                            f"not {environment!r}",)
@@ -273,6 +307,7 @@ class ConformanceEvidence:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            "evidence_kind": EVIDENCE_KIND,
             "broker_id": self.broker_id,
             "environment": self.environment,
             "suite": self.suite,
@@ -507,6 +542,7 @@ __all__ = [
     "CAPABILITY_PROBES",
     "CONFORMANCE_EVIDENCE_VERSION",
     "DEFAULT_MAX_EVIDENCE_AGE",
+    "EVIDENCE_KIND",
     "MANDATE_ID",
     "PROBED_CAPABILITIES",
     "CapabilityEvidence",

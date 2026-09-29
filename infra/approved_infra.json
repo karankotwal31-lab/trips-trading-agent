@@ -1,7 +1,7 @@
 {
   "files": {
-    ".github/workflows/trips-cloud-paper.yml": "2cf37a42957ad8980caa7770e7df8dae158f5b7d454c5032dd4793201d07fc81",
     ".github/workflows/trips-daily-deep.yml": "a2ab6726040c5a9b80a3f71841a59fd53d000b85c32b76dfb9b1436f99834729",
+    ".github/workflows/trips-live-readiness.yml": "947679307c6e9b86b505f56c478a3cfa8798d0a56a050191150d7c9e9d9d7f8d",
     "infra/cloud_cycle.py": "24150915f90ec6dd134fbcfc9eeae544980bc2a0b7ddc678972f4e0b2e4127be",
     "infra/cloud_state.py": "6b62e452660737f8abaac4b3d26b8204eef7681595b17cd43ac6851bcfc77c06",
     "infra/core_v06.sha256": "a00166f572e7b2516b1900037d1993f062bc701585ff3d4d14538002e9703252",
@@ -10,6 +10,6 @@
     "infra/neon_state.py": "4b8e76449f9aee47588db99e35823f194d803f3e3eaf77aa7b6636418ffc8096",
     "infra/requirements-cloud.txt": "bfaaa83e718f1e325d7e34ab54f7ff4b4827373de39b3e26f82e1224ff518c05"
   },
-  "manifest_hash": "1c673d0e2f04d3dcd7375f7736de98d9d81c5b41e6e373fb327dc401bdc5d059",
+  "manifest_hash": "4508654942632cdfc90d0d87982ae10175f088a90503463c2275e40961f66e36",
   "schema_version": 2
 }
