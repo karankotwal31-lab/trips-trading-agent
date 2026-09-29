@@ -121,6 +121,18 @@ def owner_authorization():
                                      environment="TEST_ENV")
 
 
+def forced_live_lifecycle(boundary=None, *, release_basis=None, authorization=None):
+    """TEST ONLY: put a lifecycle at LIVE_ENABLED to exercise downstream invariants.
+
+    Production code cannot construct LIVE_ENABLED directly. Activation itself is covered by the
+    lifecycle adversarial suite; these tests isolate the downstream gate/gateway behaviours.
+    """
+    lifecycle = Lifecycle(Stage.LIVE_READY_LOCKED, boundary or FrozenLiveBoundary(),
+                          release_basis=release_basis, authorization=authorization)
+    lifecycle._stage = Stage.LIVE_ENABLED
+    return lifecycle
+
+
 def verified_basis():
     verdict = verify_amendment(amendment_proposal())
     assert verdict["code"] == AMENDMENT_APPLICABLE, verdict
@@ -214,9 +226,17 @@ def test_the_risk_engine_blocker_is_independent_of_the_config_guard():
     assert guard["reason"] != risk["reason"]
 
 
+def test_live_enabled_cannot_be_constructed_directly():
+    try:
+        Lifecycle(Stage.LIVE_ENABLED)
+        assert False, "direct LIVE_ENABLED construction must be refused"
+    except ExecutionLayerError as exc:
+        assert "cannot be constructed directly" in str(exc)
+
+
 def test_caller_asserted_core_state_can_never_release_capital():
     """A caller passing convenient arguments must not be able to open the gate."""
-    lifecycle = Lifecycle(Stage.LIVE_ENABLED)
+    lifecycle = forced_live_lifecycle()
     result = lifecycle.may_transmit_live(rule_ids=("LIVE_GATE",), mode="live")
     assert result["permitted"] is False
     assert result["code"] == "CORE_STATE_CALLER_ASSERTED_REFUSED"
@@ -225,7 +245,7 @@ def test_caller_asserted_core_state_can_never_release_capital():
     # The mode restriction is read from the frozen validator even when asserting a rule set.
     assert result["boundary"]["permitted_modes"] == ["paper"]
     assert "cannot release capital" in " ".join(result["reasons"])
-    assert Lifecycle(Stage.LIVE_ENABLED).may_transmit_live()["permitted"] is False
+    assert forced_live_lifecycle().may_transmit_live()["permitted"] is False
     assert frozen_core_basis().source == "FROZEN_FILES"
     assert frozen_core_basis().permitted_modes == ("paper",)
 
@@ -248,12 +268,12 @@ def test_verified_owner_amendment_opens_the_production_boundary():
     assert verdict["boundary"]["released"] is True
     basis = release_basis_from_verdict(verdict)
     assert basis.source == "VERIFIED_AMENDMENT" and basis.mode == "live"
-    released = Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+    released = forced_live_lifecycle(FrozenLiveBoundary(), release_basis=basis,
                          authorization=owner_authorization())
     assert released.may_transmit_live()["permitted"] is True
     assert released.core_state_basis().source == "VERIFIED_AMENDMENT"
     # The same production boundary still refuses the unamended core.
-    assert Lifecycle(Stage.LIVE_ENABLED).may_transmit_live()["permitted"] is False
+    assert forced_live_lifecycle().may_transmit_live()["permitted"] is False
 
 
 def test_unsigned_amendment_is_refused():
@@ -466,7 +486,7 @@ def test_amended_core_transmits_a_live_money_order_to_the_test_broker():
         adapter = base.FakeAdapter()
         gateway = UniversalBrokerGateway(
             adapter=adapter, governor=base.governor(),
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+            lifecycle=forced_live_lifecycle(FrozenLiveBoundary(), release_basis=basis,
                                 authorization=owner_authorization()))
         result = gateway.submit(live_order, preflight_report=base.permissive_report(live_order, now=now),
                                portfolio=base.portfolio(), holdings={}, expected_account_id="ACCT-1",
@@ -513,7 +533,7 @@ def test_amended_core_still_refuses_a_short_or_out_of_scope_order():
             adapter = base.FakeAdapter()
             gateway = UniversalBrokerGateway(
                 adapter=adapter, governor=base.governor(),
-                lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+                lifecycle=forced_live_lifecycle(FrozenLiveBoundary(), release_basis=basis,
                                 authorization=owner_authorization()))
             result = gateway.submit(bad, preflight_report=base.permissive_report(bad, now=now),
                                    portfolio=base.portfolio(), holdings={},
@@ -530,7 +550,7 @@ def test_amended_core_still_cannot_bypass_a_supervisor_halt():
         adapter = base.FakeAdapter()
         gateway = UniversalBrokerGateway(
             adapter=adapter, governor=base.governor(), safety=safety,
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(),
+            lifecycle=forced_live_lifecycle(FrozenLiveBoundary(),
                                 release_basis=verified_basis(),
                                 authorization=owner_authorization()))
         safety.apply(interpret_supervisor_output(
@@ -554,7 +574,7 @@ def test_amended_core_does_not_relax_the_capability_or_representability_contract
         adapter = base.FakeAdapter(order_caps=caps)
         gateway = UniversalBrokerGateway(
             adapter=adapter, governor=base.governor(),
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+            lifecycle=forced_live_lifecycle(FrozenLiveBoundary(), release_basis=basis,
                                 authorization=owner_authorization()))
         result = gateway.submit(order, preflight_report=base.permissive_report(order, now=now),
                                portfolio=base.portfolio(), holdings={}, expected_account_id="ACCT-1",
@@ -565,7 +585,7 @@ def test_amended_core_does_not_relax_the_capability_or_representability_contract
         undeclared = base.UndeclaredOrderCapsAdapter()
         gateway2 = UniversalBrokerGateway(
             adapter=undeclared, governor=base.governor(),
-            lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+            lifecycle=forced_live_lifecycle(FrozenLiveBoundary(), release_basis=basis,
                                 authorization=owner_authorization()))
         again = base.intent(intent_id="int-2", idempotency_key="idem-2")
         result2 = gateway2.submit(again, preflight_report=base.permissive_report(again, now=now),
@@ -671,7 +691,7 @@ def test_an_unsigned_live_authorization_is_not_an_authorization():
 def test_release_basis_without_a_signed_owner_authorization_is_refused():
     """Owner decision A must not imply decision B: a basis is evidence, not authority."""
     try:
-        Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=verified_basis())
+        forced_live_lifecycle(FrozenLiveBoundary(), release_basis=verified_basis())
         assert False, "expected ExecutionLayerError"
     except ExecutionLayerError as exc:
         assert "signed live authorization" in str(exc)
@@ -686,7 +706,7 @@ def test_release_basis_with_a_self_minted_unsigned_authorization_is_refused():
         environment="TEST_ENV", issued_at=(now - timedelta(minutes=1)).isoformat(),
         expires_at=(now + timedelta(hours=1)).isoformat())
     try:
-        Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(), release_basis=basis,
+        forced_live_lifecycle(FrozenLiveBoundary(), release_basis=basis,
                   authorization=unsigned)
         assert False, "expected ExecutionLayerError"
     except ExecutionLayerError as exc:
