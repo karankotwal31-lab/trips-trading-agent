@@ -664,17 +664,17 @@ def test_the_gateway_mints_the_permit_immediately_before_the_only_transmission()
     assert "permit" not in signature.parameters
 
 
-def test_the_twelve_read_only_checks_run_without_submitting_anything():
+def test_the_eleven_broker_checks_run_without_submitting_anything():
     from execution.live_verification import (REQUIRED_INSTRUMENTS, LiveReadOnlyBrokerVerifier,
                                              LiveReadOnlyVerification)
 
-    assert len(READ_ONLY_CHECKS) == 12
+    assert len(READ_ONLY_CHECKS) == 11
     assert READ_ONLY_CHECKS == (
         "authenticate_legitimately", "verify_broker_identity", "verify_exact_account",
         "verify_us_equity_permissions", "verify_required_instruments_available",
         "retrieve_balances", "retrieve_positions", "retrieve_open_and_recent_orders",
         "verify_broker_clock", "verify_account_restrictions",
-        "verify_rate_limit_and_error_behaviour", "verify_live_market_data_entitlement")
+        "verify_rate_limit_and_error_behaviour")
     assert REQUIRED_INSTRUMENTS == ("SPY", "QQQ", "AAPL")
     # The verifier has no submit, no cancel and no replace of its own.
     assert not [name for name in dir(LiveReadOnlyBrokerVerifier)
@@ -744,7 +744,7 @@ def _activation_artifacts(now):
     from execution.identity import current_identity
     from execution.lifecycle import LiveAuthorization
 
-    config = base.approved_config()
+    config = base.trade_config()
     governor_hash = base.fingerprint_profile(base.TEST_PROFILE)
     identity = current_identity(config=config, governor_profile_hash=governor_hash)
     unsigned = LiveAuthorization(
@@ -766,8 +766,7 @@ def _activation_artifacts(now):
 
 
 def _full_live_verification(now, *, broker_id="alpaca", account_id="ACCT-LIVE",
-                            minutes_old=0, missing_check=None,
-                            entitlement_symbols=("SPY", "QQQ", "AAPL")):
+                            minutes_old=0, missing_check=None):
     from execution.live_verification import (LiveReadOnlyVerification, ReadOnlyCheckRecord,
                                              REQUIRED_INSTRUMENTS)
 
@@ -784,15 +783,34 @@ def _full_live_verification(now, *, broker_id="alpaca", account_id="ACCT-LIVE",
         elif name == "verify_required_instruments_available":
             observation = {"available": list(REQUIRED_INSTRUMENTS),
                            "required": list(REQUIRED_INSTRUMENTS)}
-        elif name == "verify_live_market_data_entitlement":
-            observation = {"entitled": True, "source": "synthetic-live-test",
-                           "symbols": list(entitlement_symbols)}
         records[name] = ReadOnlyCheckRecord(
             check=name, passed=True, detail="synthetic live-read-only activation fixture",
             observation=observation, verified_at=observed_at.isoformat())
     return LiveReadOnlyVerification(
         broker_id=broker_id, account_id=account_id, environment="live",
         generated_at=observed_at.isoformat(), records=records)
+
+
+def _full_market_data_verification(now, *, minutes_old=0, failed_symbol=None,
+                                   primary_provider="twelve_data",
+                                   secondary_provider="alpha_vantage"):
+    from execution.market_data import ProductionDataRecord, ProductionMarketDataVerification
+
+    observed_at = now - timedelta(minutes=minutes_old)
+    records = {}
+    for symbol in ("SPY", "QQQ", "AAPL"):
+        passed = symbol != failed_symbol
+        records[symbol] = ProductionDataRecord(
+            symbol=symbol, passed=passed,
+            detail="synthetic dual-source evidence" if passed else "synthetic failure",
+            primary_integrity_hash=f"p-{symbol}",
+            secondary_integrity_hash=f"s-{symbol}",
+            cross_source={"passed": passed, "reason": "sources_agree" if passed else "test"})
+    return ProductionMarketDataVerification(
+        generated_at=observed_at.isoformat(),
+        primary_provider=primary_provider, primary_family="fam_twelve",
+        secondary_provider=secondary_provider, secondary_family="fam_alpha",
+        interval="60min", records=records)
 
 
 def test_live_enable_refuses_when_real_account_verification_is_missing():
@@ -850,14 +868,6 @@ def test_live_verification_is_fresh_and_bound_to_broker_account_and_symbols():
     assert wrong_account.live_verification_status(
         authorization=authorization, now=now)["activation_verified"] is False
 
-    incomplete_entitlement = Lifecycle(
-        Stage.LIVE_READY_LOCKED,
-        live_verification=_full_live_verification(
-            now, entitlement_symbols=("SPY", "QQQ")))
-    result = incomplete_entitlement.live_verification_status(
-        authorization=authorization, now=now)
-    assert result["activation_verified"] is False
-    assert any("AAPL" in reason for reason in result["reasons"])
 
 
 def test_live_enable_requires_identity_evidence_and_then_allows_only_full_agreement():
@@ -879,7 +889,8 @@ def test_live_enable_requires_identity_evidence_and_then_allows_only_full_agreem
 
     lifecycle = Lifecycle(
         Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
-        live_verification=verification)
+        live_verification=verification,
+        market_data_verification=_full_market_data_verification(now))
     with base.owner_key_configured():
         result = lifecycle.advance(
             Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
@@ -898,7 +909,8 @@ def test_live_enable_refuses_identity_drift_even_when_every_other_fixture_agrees
     verification = _full_live_verification(now)
     lifecycle = Lifecycle(
         Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
-        live_verification=verification)
+        live_verification=verification,
+        market_data_verification=_full_market_data_verification(now))
     changed_governor = "f" * 64
     assert changed_governor != governor_hash
     with base.owner_key_configured():
@@ -1125,7 +1137,7 @@ def test_every_read_only_method_the_verifier_requires_is_implemented_by_a_real_c
     from execution.channels import AlpacaChannel
     from execution.live_verification import READ_ONLY_METHODS
 
-    refusals = {"recent_orders", "instrument", "restrictions", "market_data_entitlement"}
+    refusals = {"recent_orders", "instrument", "restrictions"}
     for method in READ_ONLY_METHODS:
         assert hasattr(AlpacaChannel, method), f"AlpacaChannel has no {method} at all"
         if method in refusals:
