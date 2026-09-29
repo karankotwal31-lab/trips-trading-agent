@@ -213,6 +213,13 @@ def test_json_loader_round_trips_exact_hash():
     assert load_contract_master_json(raw).fingerprint == snap.fingerprint
 
 
+def test_public_execution_api_exposes_commodity_capability():
+    import execution
+    for name in ("ContractMasterSnapshot", "ContractSpec", "CommodityTruthGate",
+                 "CommodityReadinessGate", "CommodityUniversePolicy"):
+        assert hasattr(execution, name), name
+
+
 if __name__ == "__main__":
     import traceback
     tests = [v for n, v in sorted(globals().items()) if n.startswith("test_") and callable(v)]
