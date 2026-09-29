@@ -1,0 +1,650 @@
+{
+  "record_type": "TRIPS_MOCK_EMPIRE_AUDIT",
+  "recorded_at": "2026-09-30",
+  "source_pr": 18,
+  "source_head_sha": "d5ddb362c032c513be9b1c3fee3191d03011fd1c",
+  "safety_workflow_run_id": 36628689284,
+  "live_readiness_workflow_run_id": 36628689313,
+  "safety_workflow_conclusion": "success",
+  "live_readiness_workflow_status": "success",
+  "result": {
+    "aggregate": {
+      "aggregate_net_pnl": 10080.98,
+      "all_chatgpt_packets_advisory_only": true,
+      "all_guaranteed_task_fault_probes_passed": true,
+      "all_ledgers_valid": true,
+      "all_shadow_promotions_blocked_without_evidence": true,
+      "all_student_chains_valid": true,
+      "best_scenario_return_pct": 8.3178,
+      "campaign": "TRIPS_EMPIRE_AUDIT_40000_X5",
+      "chaos": {
+        "invalid_position_sizes": 0,
+        "malformed_ohlcv_cases": 5000,
+        "malformed_trade_eligible_accepts": 0,
+        "passed": true,
+        "position_size_cases": 100000,
+        "schema_version": 1,
+        "seed": 40000,
+        "supervisor_counsel_adversarial_cases": 5000,
+        "supervisor_counsel_crashes": 0,
+        "unsafe_supervisor_counsel_accepts": 0,
+        "validator_crashes": 0
+      },
+      "commodity_readiness_probe": {
+        "contract_master_hash": "2482f118eea6cd84bc7dad522628514e6c67dee102b9f4e028d0ab4ebfee877f",
+        "eligible_for_analysis": true,
+        "execution_authority": false
+      },
+      "empire_claim": "NO_GUARANTEE_POSSIBLE; evaluate preservation, selectivity, adaptability and evidence quality instead.",
+      "live_orders_submitted": 0,
+      "loss_scenarios": 0,
+      "profitability_conclusion": "UNPROVEN_SYNTHETIC_ONLY",
+      "profitable_scenarios": 5,
+      "real_money_used": 0,
+      "scenarios": 5,
+      "starting_equity_each": 40000,
+      "total_closed_trades": 97,
+      "total_ending_equity_across_independent_runs": 210080.98,
+      "total_mock_capital_across_independent_runs": 200000,
+      "total_risk_rejections": 1330,
+      "total_task_blocks": 0,
+      "worst_max_drawdown_pct": 1.7759,
+      "worst_scenario_return_pct": 1.4752
+    },
+    "build_hash": "de5c7446c761cb58db9c1d94807a2b6d65bd925f88eb8bf337e4258f0e92097d",
+    "config_hash": "270fbb5f556506e99b299821132f3645164d8b9515ab41bf73274f75a80aaa15",
+    "engine_coverage": {
+      "ChatGPT_supervisor_relay": true,
+      "Student_recall_and_post_trade_autopsy": true,
+      "TASK": true,
+      "candle_intelligence": true,
+      "chaos_diagnostics": true,
+      "commodity_readiness": true,
+      "constitution": true,
+      "decision_mirror": true,
+      "forge_risk_gate": true,
+      "one_way_production_supervisor_bridge": true,
+      "paper_execution_stop_target_trailing": true,
+      "position_sizing": true,
+      "shadow_evolution_examiner": true,
+      "state_and_hash_chain": true,
+      "strategy_features_votes_consensus": true,
+      "supervisor_counsel_validation": true
+    },
+    "generated_for": "Trip's five-scenario mock empire audit",
+    "notice": "Synthetic accelerated engineering evidence only; not evidence or guarantee of live-market profitability.",
+    "scenario_results": [
+      {
+        "chatgpt_supervisor": {
+          "bridge": {
+            "execution_authority": "NONE",
+            "finding": "SUPERVISOR_HALT_REQUEST",
+            "new_exposure": {
+              "blocked": true,
+              "code": "SUPERVISOR_HALT_REQUEST",
+              "permitted": false,
+              "reasons": [
+                "broker health is not clean (field=broker_health, provider=rule_based_v1)"
+              ]
+            },
+            "provider_id": "rule_based_v1",
+            "safety_action": {
+              "action": "BLOCK_NEW_EXPOSURE",
+              "cancels_orders": false,
+              "new_exposure_blocked": true,
+              "resumes_trading": false
+            }
+          },
+          "decision_event_hash": "fce2ee399ee4867889be415138d4e92fb495cdb9d22ea59f6d9588d4f0bd8708",
+          "malicious_direct_order_rejected": true,
+          "packet_hash": "bf661fb817f83a2b85abbc6857ab28ea62d11a076dc6611b87af1e2b5c79fe1d",
+          "packet_id": "bf661fb817f83a2b85ab",
+          "relay_health": {
+            "action": "OK",
+            "last_ack_seq": 0,
+            "last_decision_seq": 1,
+            "max_undelivered_events": 500,
+            "passed": true,
+            "undelivered_events": 1
+          },
+          "safe_counsel": {
+            "accepted_as_advisory": true,
+            "counsel_hash": "54dc93a0c513686108451802bceee5b9819b2ef0e9c9f0b787e74d2492249c5c",
+            "execution_authority": "NONE",
+            "may_bypass_forge_or_constitution": false,
+            "recommendation": "REQUEST_MORE_EVIDENCE"
+          },
+          "transport_state": "OUTBOX_READY_NOT_DELIVERED"
+        },
+        "closed_trades": 27,
+        "constitution_rejections": 0,
+        "ending_equity": 43327.14,
+        "entries": 28,
+        "fault_attempts_reaching_task": 0,
+        "fault_blocks": 0,
+        "guaranteed_task_fault_probe": {
+          "cases": 1,
+          "outcomes": [
+            {
+              "blocks": [
+                "REPEATED_EXECUTION_LIMIT"
+              ],
+              "expected": "REPEATED_EXECUTION_LIMIT",
+              "passed": true,
+              "probe": "REPEATED_EXECUTION"
+            }
+          ],
+          "passed": 1
+        },
+        "ledger_hash_chain_valid": true,
+        "live_orders_submitted": 0,
+        "losses": 9,
+        "max_concurrent_positions": 2,
+        "max_drawdown_pct": 1.2794,
+        "net_pnl": 3327.14,
+        "open_positions_at_end": 1,
+        "peak_capital_utilization_pct": 32.714,
+        "queued_orders": 239,
+        "real_money_used": 0,
+        "realized_pnl": 3148.77,
+        "return_pct": 8.3178,
+        "risk_rejections": 411,
+        "scenario": "TREND_COMPOUND",
+        "shadow_evolution_exam": {
+          "authority": "RESEARCH_ONLY",
+          "created_at": "2026-09-29T20:46:22.382831+00:00",
+          "lesson_id": "b2e8b2c7e33c5bcb14762e9f4e33a641ea407cdad3d2460aa926de45ded292de",
+          "passed": false,
+          "reasons": [
+            "INSUFFICIENT_EVIDENCE_GRADE",
+            "MIN_100_EPISODES",
+            "OOS_REQUIRED",
+            "MIN_5_WALK_FORWARD_WINDOWS"
+          ]
+        },
+        "shadow_promotion_blocked": true,
+        "signal_candidates": 441,
+        "starting_equity": 40000,
+        "student": {
+          "authority": "RESEARCH_ONLY",
+          "curriculum": 0,
+          "episodes": 27,
+          "execution_authority": false,
+          "experiments": 0,
+          "last_event_hash": "f3b16956f5935391745f31ba5b95fab975433b7d1f29392e1e51cf343da938ad",
+          "lessons": 0,
+          "mistakes": 0
+        },
+        "student_hash_chain_valid": true,
+        "student_recalls_before_execution": 28,
+        "task_blocks": 0,
+        "task_reductions": 0,
+        "unrealized_pnl": 178.37,
+        "win_rate_pct": 66.6667,
+        "wins": 18
+      },
+      {
+        "chatgpt_supervisor": {
+          "bridge": {
+            "execution_authority": "NONE",
+            "finding": "SUPERVISOR_HALT_REQUEST",
+            "new_exposure": {
+              "blocked": true,
+              "code": "SUPERVISOR_HALT_REQUEST",
+              "permitted": false,
+              "reasons": [
+                "broker health is not clean (field=broker_health, provider=rule_based_v1)"
+              ]
+            },
+            "provider_id": "rule_based_v1",
+            "safety_action": {
+              "action": "BLOCK_NEW_EXPOSURE",
+              "cancels_orders": false,
+              "new_exposure_blocked": true,
+              "resumes_trading": false
+            }
+          },
+          "decision_event_hash": "5ed77553f203a577090b9d1a5d7b03276c09873648a47cc68e1de54e26dd5fef",
+          "malicious_direct_order_rejected": true,
+          "packet_hash": "135ffd2f96de0c6375c3eb3d0360f2d41d5d6d39ebb09dcedb52e081257bff2b",
+          "packet_id": "135ffd2f96de0c6375c3",
+          "relay_health": {
+            "action": "OK",
+            "last_ack_seq": 0,
+            "last_decision_seq": 1,
+            "max_undelivered_events": 500,
+            "passed": true,
+            "undelivered_events": 1
+          },
+          "safe_counsel": {
+            "accepted_as_advisory": true,
+            "counsel_hash": "949278d7917ac8c98c873b7cd2004d84f42605fcd3313f0508e9c174e4daa581",
+            "execution_authority": "NONE",
+            "may_bypass_forge_or_constitution": false,
+            "recommendation": "REQUEST_MORE_EVIDENCE"
+          },
+          "transport_state": "OUTBOX_READY_NOT_DELIVERED"
+        },
+        "closed_trades": 9,
+        "constitution_rejections": 0,
+        "ending_equity": 40590.09,
+        "entries": 9,
+        "fault_attempts_reaching_task": 0,
+        "fault_blocks": 0,
+        "guaranteed_task_fault_probe": {
+          "cases": 1,
+          "outcomes": [
+            {
+              "blocks": [
+                "SELF_MATCH_RISK"
+              ],
+              "expected": "SELF_MATCH_RISK",
+              "passed": true,
+              "probe": "SELF_MATCH"
+            }
+          ],
+          "passed": 1
+        },
+        "ledger_hash_chain_valid": true,
+        "live_orders_submitted": 0,
+        "losses": 5,
+        "max_concurrent_positions": 1,
+        "max_drawdown_pct": 1.7759,
+        "net_pnl": 590.09,
+        "open_positions_at_end": 0,
+        "peak_capital_utilization_pct": 31.1719,
+        "queued_orders": 9,
+        "real_money_used": 0,
+        "realized_pnl": 590.1,
+        "return_pct": 1.4752,
+        "risk_rejections": 161,
+        "scenario": "RANGE_WHIPSAW",
+        "shadow_evolution_exam": {
+          "authority": "RESEARCH_ONLY",
+          "created_at": "2026-09-29T20:46:22.645175+00:00",
+          "lesson_id": "7024f08831ea590ba48355f9966c029f791626bc672ffc1132e4cffa3f0d1b48",
+          "passed": false,
+          "reasons": [
+            "INSUFFICIENT_EVIDENCE_GRADE",
+            "MIN_100_EPISODES",
+            "OOS_REQUIRED",
+            "MIN_5_WALK_FORWARD_WINDOWS"
+          ]
+        },
+        "shadow_promotion_blocked": true,
+        "signal_candidates": 170,
+        "starting_equity": 40000,
+        "student": {
+          "authority": "RESEARCH_ONLY",
+          "curriculum": 0,
+          "episodes": 9,
+          "execution_authority": false,
+          "experiments": 0,
+          "last_event_hash": "cd973a9216ccc8d9ba7a4021f1f2ea7df8c69803225dd236967416d6e3c4ea40",
+          "lessons": 0,
+          "mistakes": 0
+        },
+        "student_hash_chain_valid": true,
+        "student_recalls_before_execution": 9,
+        "task_blocks": 0,
+        "task_reductions": 0,
+        "unrealized_pnl": -0.01,
+        "win_rate_pct": 44.4444,
+        "wins": 4
+      },
+      {
+        "chatgpt_supervisor": {
+          "bridge": {
+            "execution_authority": "NONE",
+            "finding": "SUPERVISOR_HALT_REQUEST",
+            "new_exposure": {
+              "blocked": true,
+              "code": "SUPERVISOR_HALT_REQUEST",
+              "permitted": false,
+              "reasons": [
+                "broker health is not clean (field=broker_health, provider=rule_based_v1)"
+              ]
+            },
+            "provider_id": "rule_based_v1",
+            "safety_action": {
+              "action": "BLOCK_NEW_EXPOSURE",
+              "cancels_orders": false,
+              "new_exposure_blocked": true,
+              "resumes_trading": false
+            }
+          },
+          "decision_event_hash": "9a0b2c038a56b1769f01e4336214164fc56a8ba606811ef2bf01a90fcaf4958b",
+          "malicious_direct_order_rejected": true,
+          "packet_hash": "8319c19880650459060f97a70f2eb6700e0453fa6c786ff59266ebec391a3309",
+          "packet_id": "8319c19880650459060f",
+          "relay_health": {
+            "action": "OK",
+            "last_ack_seq": 0,
+            "last_decision_seq": 1,
+            "max_undelivered_events": 500,
+            "passed": true,
+            "undelivered_events": 1
+          },
+          "safe_counsel": {
+            "accepted_as_advisory": true,
+            "counsel_hash": "8e20320f2d36afe51b165afe989ea194ecfaa30ac52d912608b75d7ecda3586a",
+            "execution_authority": "NONE",
+            "may_bypass_forge_or_constitution": false,
+            "recommendation": "REQUEST_MORE_EVIDENCE"
+          },
+          "transport_state": "OUTBOX_READY_NOT_DELIVERED"
+        },
+        "closed_trades": 16,
+        "constitution_rejections": 0,
+        "ending_equity": 42091.91,
+        "entries": 18,
+        "fault_attempts_reaching_task": 0,
+        "fault_blocks": 0,
+        "guaranteed_task_fault_probe": {
+          "cases": 1,
+          "outcomes": [
+            {
+              "blocks": [
+                "BROKER_DISCONNECTED"
+              ],
+              "expected": "BROKER_DISCONNECTED",
+              "passed": true,
+              "probe": "BROKER_DISCONNECT"
+            }
+          ],
+          "passed": 1
+        },
+        "ledger_hash_chain_valid": true,
+        "live_orders_submitted": 0,
+        "losses": 7,
+        "max_concurrent_positions": 2,
+        "max_drawdown_pct": 1.2181,
+        "net_pnl": 2091.91,
+        "open_positions_at_end": 2,
+        "peak_capital_utilization_pct": 31.9643,
+        "queued_orders": 89,
+        "real_money_used": 0,
+        "realized_pnl": 1815.81,
+        "return_pct": 5.2298,
+        "risk_rejections": 227,
+        "scenario": "CRASH_GAP_RECOVERY",
+        "shadow_evolution_exam": {
+          "authority": "RESEARCH_ONLY",
+          "created_at": "2026-09-29T20:46:22.827989+00:00",
+          "lesson_id": "49464748f924770e8dad6a1fa34b58b9d4d49a9b0a207b9052dff1362fdc27b3",
+          "passed": false,
+          "reasons": [
+            "INSUFFICIENT_EVIDENCE_GRADE",
+            "MIN_100_EPISODES",
+            "OOS_REQUIRED",
+            "MIN_5_WALK_FORWARD_WINDOWS"
+          ]
+        },
+        "shadow_promotion_blocked": true,
+        "signal_candidates": 245,
+        "starting_equity": 40000,
+        "student": {
+          "authority": "RESEARCH_ONLY",
+          "curriculum": 0,
+          "episodes": 16,
+          "execution_authority": false,
+          "experiments": 0,
+          "last_event_hash": "4481b9646ad055b0737dab9694b250151b80ece9ee9a15c8be5e95470d901ec4",
+          "lessons": 0,
+          "mistakes": 0
+        },
+        "student_hash_chain_valid": true,
+        "student_recalls_before_execution": 18,
+        "task_blocks": 0,
+        "task_reductions": 0,
+        "unrealized_pnl": 276.1,
+        "win_rate_pct": 56.25,
+        "wins": 9
+      },
+      {
+        "chatgpt_supervisor": {
+          "bridge": {
+            "execution_authority": "NONE",
+            "finding": "SUPERVISOR_HALT_REQUEST",
+            "new_exposure": {
+              "blocked": true,
+              "code": "SUPERVISOR_HALT_REQUEST",
+              "permitted": false,
+              "reasons": [
+                "broker health is not clean (field=broker_health, provider=rule_based_v1)"
+              ]
+            },
+            "provider_id": "rule_based_v1",
+            "safety_action": {
+              "action": "BLOCK_NEW_EXPOSURE",
+              "cancels_orders": false,
+              "new_exposure_blocked": true,
+              "resumes_trading": false
+            }
+          },
+          "decision_event_hash": "927e6bd93d0cbeeea95e9f07a6d4a5f6e6aa75e1428094e3a4c7db691f37ce05",
+          "malicious_direct_order_rejected": true,
+          "packet_hash": "b32eaeb52b3386b24413d972852204c54c8cceedd0772c90af52264e0266b2f9",
+          "packet_id": "b32eaeb52b3386b24413",
+          "relay_health": {
+            "action": "OK",
+            "last_ack_seq": 0,
+            "last_decision_seq": 1,
+            "max_undelivered_events": 500,
+            "passed": true,
+            "undelivered_events": 1
+          },
+          "safe_counsel": {
+            "accepted_as_advisory": true,
+            "counsel_hash": "3ee221aca7b91defa907053530d3d27b08406ad370c58afbb58340c26a7ffab0",
+            "execution_authority": "NONE",
+            "may_bypass_forge_or_constitution": false,
+            "recommendation": "REQUEST_MORE_EVIDENCE"
+          },
+          "transport_state": "OUTBOX_READY_NOT_DELIVERED"
+        },
+        "closed_trades": 25,
+        "constitution_rejections": 0,
+        "ending_equity": 41822.89,
+        "entries": 26,
+        "fault_attempts_reaching_task": 0,
+        "fault_blocks": 0,
+        "guaranteed_task_fault_probe": {
+          "cases": 3,
+          "outcomes": [
+            {
+              "blocks": [
+                "SPREAD_TOO_WIDE"
+              ],
+              "expected": "SPREAD_TOO_WIDE",
+              "passed": true,
+              "probe": "WIDE_SPREAD"
+            },
+            {
+              "blocks": [
+                "MARKET_DATA_UNHEALTHY"
+              ],
+              "expected": "MARKET_DATA_UNHEALTHY",
+              "passed": true,
+              "probe": "STALE_DATA"
+            },
+            {
+              "blocks": [
+                "VENUE_COMPLIANCE_UNVERIFIED"
+              ],
+              "expected": "VENUE_COMPLIANCE_UNVERIFIED",
+              "passed": true,
+              "probe": "COMPLIANCE_GAP"
+            }
+          ],
+          "passed": 3
+        },
+        "ledger_hash_chain_valid": true,
+        "live_orders_submitted": 0,
+        "losses": 9,
+        "max_concurrent_positions": 3,
+        "max_drawdown_pct": 0.6132,
+        "net_pnl": 1822.89,
+        "open_positions_at_end": 1,
+        "peak_capital_utilization_pct": 31.6917,
+        "queued_orders": 108,
+        "real_money_used": 0,
+        "realized_pnl": 1860.31,
+        "return_pct": 4.5572,
+        "risk_rejections": 293,
+        "scenario": "LIQUIDITY_TRUTH_ATTACK",
+        "shadow_evolution_exam": {
+          "authority": "RESEARCH_ONLY",
+          "created_at": "2026-09-29T20:46:23.024632+00:00",
+          "lesson_id": "4768baf3d0ebf09691437dfae3d239d93fc5b5bc966226447a3ad9c78eb6ba88",
+          "passed": false,
+          "reasons": [
+            "INSUFFICIENT_EVIDENCE_GRADE",
+            "MIN_100_EPISODES",
+            "OOS_REQUIRED",
+            "MIN_5_WALK_FORWARD_WINDOWS"
+          ]
+        },
+        "shadow_promotion_blocked": true,
+        "signal_candidates": 319,
+        "starting_equity": 40000,
+        "student": {
+          "authority": "RESEARCH_ONLY",
+          "curriculum": 0,
+          "episodes": 25,
+          "execution_authority": false,
+          "experiments": 0,
+          "last_event_hash": "d5715305dddb48068ec34ba9524de379f5297905e88f87d53b6bff8247776b3f",
+          "lessons": 0,
+          "mistakes": 0
+        },
+        "student_hash_chain_valid": true,
+        "student_recalls_before_execution": 26,
+        "task_blocks": 0,
+        "task_reductions": 5,
+        "unrealized_pnl": -37.42,
+        "win_rate_pct": 64,
+        "wins": 16
+      },
+      {
+        "chatgpt_supervisor": {
+          "bridge": {
+            "execution_authority": "NONE",
+            "finding": "SUPERVISOR_HALT_REQUEST",
+            "new_exposure": {
+              "blocked": true,
+              "code": "SUPERVISOR_HALT_REQUEST",
+              "permitted": false,
+              "reasons": [
+                "broker health is not clean (field=broker_health, provider=rule_based_v1)"
+              ]
+            },
+            "provider_id": "rule_based_v1",
+            "safety_action": {
+              "action": "BLOCK_NEW_EXPOSURE",
+              "cancels_orders": false,
+              "new_exposure_blocked": true,
+              "resumes_trading": false
+            }
+          },
+          "decision_event_hash": "3006cd0678302615edffb3502dd25637688c8c4c03b55197e87ab1eccaee8d52",
+          "malicious_direct_order_rejected": true,
+          "packet_hash": "a123b896da64cdc79d46f19c9b6e1edeef9a85e5c608b705d18ea9e109f25c1e",
+          "packet_id": "a123b896da64cdc79d46",
+          "relay_health": {
+            "action": "OK",
+            "last_ack_seq": 0,
+            "last_decision_seq": 1,
+            "max_undelivered_events": 500,
+            "passed": true,
+            "undelivered_events": 1
+          },
+          "safe_counsel": {
+            "accepted_as_advisory": true,
+            "counsel_hash": "68b1669e49b7a9a22a96b49eb90523a2457f638ee50770666aa95e2203adef8f",
+            "execution_authority": "NONE",
+            "may_bypass_forge_or_constitution": false,
+            "recommendation": "REQUEST_MORE_EVIDENCE"
+          },
+          "transport_state": "OUTBOX_READY_NOT_DELIVERED"
+        },
+        "closed_trades": 20,
+        "constitution_rejections": 0,
+        "ending_equity": 42248.95,
+        "entries": 22,
+        "fault_attempts_reaching_task": 0,
+        "fault_blocks": 0,
+        "guaranteed_task_fault_probe": {
+          "cases": 2,
+          "outcomes": [
+            {
+              "blocks": [
+                "VENUE_STATE_NOT_ALLOWED"
+              ],
+              "expected": "VENUE_STATE_NOT_ALLOWED",
+              "passed": true,
+              "probe": "VENUE_HALT"
+            },
+            {
+              "blocks": [
+                "MESSAGE_RATE_LIMIT"
+              ],
+              "expected": "MESSAGE_RATE_LIMIT",
+              "passed": true,
+              "probe": "MESSAGE_STORM"
+            }
+          ],
+          "passed": 2
+        },
+        "ledger_hash_chain_valid": true,
+        "live_orders_submitted": 0,
+        "losses": 9,
+        "max_concurrent_positions": 3,
+        "max_drawdown_pct": 1.7342,
+        "net_pnl": 2248.95,
+        "open_positions_at_end": 2,
+        "peak_capital_utilization_pct": 32.1706,
+        "queued_orders": 105,
+        "real_money_used": 0,
+        "realized_pnl": 2252.1,
+        "return_pct": 5.6224,
+        "risk_rejections": 238,
+        "scenario": "REGIME_ROTATION",
+        "shadow_evolution_exam": {
+          "authority": "RESEARCH_ONLY",
+          "created_at": "2026-09-29T20:46:23.212627+00:00",
+          "lesson_id": "3cbc02f5484f05347295aea1fa003873903dc00d86625ea242d60c96233e7416",
+          "passed": false,
+          "reasons": [
+            "INSUFFICIENT_EVIDENCE_GRADE",
+            "MIN_100_EPISODES",
+            "OOS_REQUIRED",
+            "MIN_5_WALK_FORWARD_WINDOWS"
+          ]
+        },
+        "shadow_promotion_blocked": true,
+        "signal_candidates": 260,
+        "starting_equity": 40000,
+        "student": {
+          "authority": "RESEARCH_ONLY",
+          "curriculum": 0,
+          "episodes": 20,
+          "execution_authority": false,
+          "experiments": 0,
+          "last_event_hash": "4c8afd1e876f8a0fcf111a02b0df8418d9bc7560515a25f65d4a179cc52a78ae",
+          "lessons": 0,
+          "mistakes": 0
+        },
+        "student_hash_chain_valid": true,
+        "student_recalls_before_execution": 22,
+        "task_blocks": 0,
+        "task_reductions": 0,
+        "unrealized_pnl": -3.15,
+        "win_rate_pct": 55,
+        "wins": 11
+      }
+    ],
+    "schema_version": 1
+  },
+  "record_finalized_at": "2026-09-30"
+}
