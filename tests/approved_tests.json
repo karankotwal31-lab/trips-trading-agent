@@ -17,8 +17,8 @@
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3",
     "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc",
     "tests/test_production_bootstrap.py": "d406b398af1381cada8575f074edc60301c2cbefdf1ca1049a122c36e4e3f9ab",
-    "tests/test_commodity_readiness.py": "b1656e0e1e3325c02a5181d1c30362c67ccee402161e4694a8b1490354b26b75"
+    "tests/test_commodity_readiness.py": "13168f172a09729484f214311c8e17d6e7b9e3e37b70637383f90c0492feb5d6"
   },
-  "manifest_hash": "9d4a2ebc9c4c43f98b89677b4f24a8fd7b34f72aeab5d6e86f1c5b5f7353fe5b",
+  "manifest_hash": "8327b4ddcc2a8c4679661a0f256abf1ff766d7168e644bed96e86d0fd9068869",
   "schema_version": 1
 }
