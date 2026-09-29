@@ -33,8 +33,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: trips-live-readiness
-  cancel-in-progress: false
+  # Serialize only the same Git ref. A stale run on another branch/head must never block
+  # verification of the exact PR head currently under review.
+  group: trips-live-readiness-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   live-readiness:

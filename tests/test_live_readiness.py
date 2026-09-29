@@ -664,17 +664,17 @@ def test_the_gateway_mints_the_permit_immediately_before_the_only_transmission()
     assert "permit" not in signature.parameters
 
 
-def test_the_twelve_read_only_checks_run_without_submitting_anything():
+def test_the_eleven_broker_read_only_checks_run_without_submitting_anything():
     from execution.live_verification import (REQUIRED_INSTRUMENTS, LiveReadOnlyBrokerVerifier,
                                              LiveReadOnlyVerification)
 
-    assert len(READ_ONLY_CHECKS) == 12
+    assert len(READ_ONLY_CHECKS) == 11
     assert READ_ONLY_CHECKS == (
         "authenticate_legitimately", "verify_broker_identity", "verify_exact_account",
         "verify_us_equity_permissions", "verify_required_instruments_available",
         "retrieve_balances", "retrieve_positions", "retrieve_open_and_recent_orders",
         "verify_broker_clock", "verify_account_restrictions",
-        "verify_rate_limit_and_error_behaviour", "verify_live_market_data_entitlement")
+        "verify_rate_limit_and_error_behaviour")
     assert REQUIRED_INSTRUMENTS == ("SPY", "QQQ", "AAPL")
     # The verifier has no submit, no cancel and no replace of its own.
     assert not [name for name in dir(LiveReadOnlyBrokerVerifier)
@@ -766,8 +766,7 @@ def _activation_artifacts(now):
 
 
 def _full_live_verification(now, *, broker_id="alpaca", account_id="ACCT-LIVE",
-                            minutes_old=0, missing_check=None,
-                            entitlement_symbols=("SPY", "QQQ", "AAPL")):
+                            minutes_old=0, missing_check=None):
     from execution.live_verification import (LiveReadOnlyVerification, ReadOnlyCheckRecord,
                                              REQUIRED_INSTRUMENTS)
 
@@ -784,14 +783,36 @@ def _full_live_verification(now, *, broker_id="alpaca", account_id="ACCT-LIVE",
         elif name == "verify_required_instruments_available":
             observation = {"available": list(REQUIRED_INSTRUMENTS),
                            "required": list(REQUIRED_INSTRUMENTS)}
-        elif name == "verify_live_market_data_entitlement":
-            observation = {"entitled": True, "source": "synthetic-live-test",
-                           "symbols": list(entitlement_symbols)}
         records[name] = ReadOnlyCheckRecord(
             check=name, passed=True, detail="synthetic live-read-only activation fixture",
             observation=observation, verified_at=observed_at.isoformat())
     return LiveReadOnlyVerification(
         broker_id=broker_id, account_id=account_id, environment="live",
+        generated_at=observed_at.isoformat(), records=records)
+
+
+
+def _full_production_data_verification(now, *, minutes_old=0, failed_symbol=None):
+    from execution.production_data import (ProductionDataSymbolRecord,
+                                           ProductionDataVerification,
+                                           REQUIRED_SYMBOLS)
+
+    observed_at = now - timedelta(minutes=minutes_old)
+    records = {}
+    for symbol in REQUIRED_SYMBOLS:
+        passed = symbol != failed_symbol
+        records[symbol] = ProductionDataSymbolRecord(
+            symbol=symbol, passed=passed,
+            detail="synthetic dual-source production-data fixture",
+            primary={"source": "primary", "source_family": "family-a",
+                     "source_kind": "real", "realtime_request_attested": True},
+            secondary={"source": "secondary", "source_family": "family-b",
+                       "source_kind": "real", "realtime_request_attested": True},
+            cross_source={"passed": passed, "reason": "sources_agree" if passed else "mismatch"},
+            verified_at=observed_at.isoformat())
+    return ProductionDataVerification(
+        primary_source="primary", primary_family="family-a",
+        secondary_source="secondary", secondary_family="family-b",
         generated_at=observed_at.isoformat(), records=records)
 
 
@@ -832,7 +853,8 @@ def test_live_verification_is_fresh_and_bound_to_broker_account_and_symbols():
     authorization, _, _ = _activation_artifacts(now)
 
     good = Lifecycle(
-        Stage.LIVE_READY_LOCKED, live_verification=_full_live_verification(now))
+        Stage.LIVE_READY_LOCKED, live_verification=_full_live_verification(now),
+        production_data_verification=_full_production_data_verification(now))
     status = good.live_verification_status(authorization=authorization, now=now)
     assert status["verified"] is True
     assert status["authorization_bound"] is True
@@ -840,24 +862,53 @@ def test_live_verification_is_fresh_and_bound_to_broker_account_and_symbols():
 
     stale = Lifecycle(
         Stage.LIVE_READY_LOCKED,
-        live_verification=_full_live_verification(now, minutes_old=16))
+        live_verification=_full_live_verification(now, minutes_old=16),
+        production_data_verification=_full_production_data_verification(now))
     assert stale.live_verification_status(
         authorization=authorization, now=now)["activation_verified"] is False
 
     wrong_account = Lifecycle(
         Stage.LIVE_READY_LOCKED,
-        live_verification=_full_live_verification(now, account_id="SOMEONE-ELSE"))
+        live_verification=_full_live_verification(now, account_id="SOMEONE-ELSE"),
+        production_data_verification=_full_production_data_verification(now))
     assert wrong_account.live_verification_status(
         authorization=authorization, now=now)["activation_verified"] is False
 
-    incomplete_entitlement = Lifecycle(
+    missing_data = Lifecycle(
         Stage.LIVE_READY_LOCKED,
-        live_verification=_full_live_verification(
-            now, entitlement_symbols=("SPY", "QQQ")))
-    result = incomplete_entitlement.live_verification_status(
-        authorization=authorization, now=now)
-    assert result["activation_verified"] is False
-    assert any("AAPL" in reason for reason in result["reasons"])
+        live_verification=_full_live_verification(now))
+    assert missing_data.production_data_status(now=now)["verified"] is False
+
+    stale_data = Lifecycle(
+        Stage.LIVE_READY_LOCKED,
+        live_verification=_full_live_verification(now),
+        production_data_verification=_full_production_data_verification(now, minutes_old=16))
+    assert stale_data.production_data_status(now=now)["verified"] is False
+
+    failed_data = Lifecycle(
+        Stage.LIVE_READY_LOCKED,
+        live_verification=_full_live_verification(now),
+        production_data_verification=_full_production_data_verification(
+            now, failed_symbol="AAPL"))
+    result = failed_data.production_data_status(now=now)
+    assert result["verified"] is False
+    assert "AAPL" in " ".join(result["reasons"])
+
+
+def test_live_enable_refuses_without_separate_production_truth_evidence():
+    import test_execution_layer as base
+
+    now = datetime.now(timezone.utc)
+    authorization, config, governor_hash = _activation_artifacts(now)
+    lifecycle = Lifecycle(
+        Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
+        live_verification=_full_live_verification(now))
+    with base.owner_key_configured():
+        result = lifecycle.advance(
+            Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
+            now=now, config=config, governor_profile_hash=governor_hash)
+    assert result["advanced"] is False
+    assert result["code"] == "LIVE_ENABLE_REFUSED_PRODUCTION_DATA_VERIFICATION"
 
 
 def test_live_enable_requires_identity_evidence_and_then_allows_only_full_agreement():
@@ -869,7 +920,8 @@ def test_live_enable_requires_identity_evidence_and_then_allows_only_full_agreem
 
     missing = Lifecycle(
         Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
-        live_verification=verification)
+        live_verification=verification,
+        production_data_verification=_full_production_data_verification(now))
     with base.owner_key_configured():
         result = missing.advance(
             Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
@@ -879,7 +931,8 @@ def test_live_enable_requires_identity_evidence_and_then_allows_only_full_agreem
 
     lifecycle = Lifecycle(
         Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
-        live_verification=verification)
+        live_verification=verification,
+        production_data_verification=_full_production_data_verification(now))
     with base.owner_key_configured():
         result = lifecycle.advance(
             Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=authorization,
@@ -898,7 +951,8 @@ def test_live_enable_refuses_identity_drift_even_when_every_other_fixture_agrees
     verification = _full_live_verification(now)
     lifecycle = Lifecycle(
         Stage.LIVE_READY_LOCKED, boundary=base.ReleasingBoundary(),
-        live_verification=verification)
+        live_verification=verification,
+        production_data_verification=_full_production_data_verification(now))
     changed_governor = "f" * 64
     assert changed_governor != governor_hash
     with base.owner_key_configured():

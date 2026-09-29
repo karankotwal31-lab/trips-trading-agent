@@ -42,6 +42,7 @@ PINNED_FILES = (
     "tests/test_live_readiness.py",
     "tests/test_execution_evidence.py",
     "tests/test_live_dry_run.py",
+    "tests/test_production_bootstrap.py",
     "infra/tests/test_cloud_shell.py",
     "scripts/verify_all.sh",
     "scripts/githooks/pre-push",
