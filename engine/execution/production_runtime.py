@@ -17,11 +17,15 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .channels import AlpacaChannel, LiveAccountReadOnlyView
 from .live_verification import LiveReadOnlyBrokerVerifier, LiveReadOnlyVerification
-from .market_data import ProductionMarketDataProvider, provider_credential_status
+from .market_data import provider_credential_status
 from .production_data import (ProductionDataVerification,
                               verify_dual_source_production_data)
-from .realtime_providers import (TWELVE_DATA_CREDENTIAL_ENV,
-                                 TwelveDataRealtimeProvider)
+from .realtime_providers import (
+    ALPHA_VANTAGE_CREDENTIAL_ENV,
+    TWELVE_DATA_CREDENTIAL_ENV,
+    AlphaVantageRealtimeProvider,
+    TwelveDataRealtimeProvider,
+)
 
 BROKER_ENV = "TRIPS_LIVE_BROKER"
 ACCOUNT_ENV = "TRIPS_LIVE_ACCOUNT_ID"
@@ -31,6 +35,7 @@ PRIMARY_PROVIDER_ENV = "TRIPS_PRIMARY_DATA_PROVIDER"
 SECONDARY_PROVIDER_ENV = "TRIPS_SECONDARY_DATA_PROVIDER"
 
 SUPPORTED_LIVE_BROKERS: Tuple[str, ...] = ("alpaca",)
+SUPPORTED_REALTIME_DATA_PROVIDERS: Tuple[str, ...] = ("alpha_vantage", "twelve_data")
 
 
 class ProductionBootstrapError(RuntimeError):
@@ -102,15 +107,22 @@ def build_read_only_broker_verifier(*, environ: Optional[Mapping[str, str]] = No
 
 
 def _build_production_provider(name: str, env: Mapping[str, str]) -> Any:
-    """Construct one reviewed realtime provider without relabeling frozen provider identity."""
-    if name == "twelve_data":
-        key = _value(env, TWELVE_DATA_CREDENTIAL_ENV)
+    """Construct one explicitly reviewed realtime provider; unknown providers fail closed."""
+    if name not in SUPPORTED_REALTIME_DATA_PROVIDERS:
+        raise ProductionBootstrapError(
+            f"production data provider {name!r} is not on the reviewed realtime allowlist "
+            f"{list(SUPPORTED_REALTIME_DATA_PROVIDERS)}")
+    if name == "alpha_vantage":
+        key = _value(env, ALPHA_VANTAGE_CREDENTIAL_ENV)
         if not key:
             raise ProductionBootstrapError(
-                f"Twelve Data live readiness requires {TWELVE_DATA_CREDENTIAL_ENV}")
-        return TwelveDataRealtimeProvider(api_key=key)
-    return ProductionMarketDataProvider(
-        provider_name=name, source_kind="real", environ=env)
+                f"Alpha Vantage live readiness requires {ALPHA_VANTAGE_CREDENTIAL_ENV}")
+        return AlphaVantageRealtimeProvider(api_key=key)
+    key = _value(env, TWELVE_DATA_CREDENTIAL_ENV)
+    if not key:
+        raise ProductionBootstrapError(
+            f"Twelve Data live readiness requires {TWELVE_DATA_CREDENTIAL_ENV}")
+    return TwelveDataRealtimeProvider(api_key=key)
 
 
 def build_production_data_providers(*, environ: Optional[Mapping[str, str]] = None
@@ -217,6 +229,7 @@ __all__ = [
     "PRIMARY_PROVIDER_ENV",
     "SECONDARY_PROVIDER_ENV",
     "SUPPORTED_LIVE_BROKERS",
+    "SUPPORTED_REALTIME_DATA_PROVIDERS",
     "ExternalReadinessArtifacts",
     "ProductionBootstrapError",
     "build_production_data_providers",
