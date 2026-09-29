@@ -21,7 +21,11 @@ def main() -> int:
             text=True,
             capture_output=True,
         )
-        tail = [line for line in proc.stdout.splitlines() if line.strip()]
+        stdout_lines = [line for line in proc.stdout.splitlines() if line.strip()]
+        for line in stdout_lines:
+            if line.startswith("SCENARIO_BIAS_REPORT="):
+                print(line)
+        tail = stdout_lines
         results.append({
             "test": path.name,
             "passed": proc.returncode == 0,
