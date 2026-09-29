@@ -279,7 +279,12 @@ class Lifecycle:
                  authorization: Optional[LiveAuthorization] = None,
                  live_verification: Optional[Mapping[str, Any]] = None,
                  market_data_verification: Optional[Any] = None) -> None:
-        self._stage = Stage(stage)
+        requested_stage = Stage(stage)
+        if requested_stage is Stage.LIVE_ENABLED:
+            raise ExecutionLayerError(
+                "LIVE_ENABLED cannot be constructed directly; rebuild at LIVE_READY_LOCKED and "
+                "re-run the owner, broker, data, identity and frozen-boundary activation proof")
+        self._stage = requested_stage
         self._boundary = boundary or FrozenLiveBoundary()
         if release_basis is not None and release_basis.source not in CORE_STATE_SOURCES:
             raise ExecutionLayerError(f"unrecognized release basis source {release_basis.source!r}")
