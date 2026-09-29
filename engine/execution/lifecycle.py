@@ -59,6 +59,7 @@ def _outstanding_parts(failing: Sequence[str]) -> List[str]:
 LIVE_LOCKED_REFUSAL = "LIVE_LOCKED_REFUSAL"
 CORE_STATE_CALLER_ASSERTED_REFUSED = "CORE_STATE_CALLER_ASSERTED_REFUSED"
 CORE_STATE_SOURCES = ("FROZEN_FILES", "VERIFIED_AMENDMENT", "CALLER_ASSERTED")
+LIVE_VERIFICATION_MAX_AGE_SECONDS = 15 * 60
 
 
 class Stage(str, Enum):
@@ -294,7 +295,9 @@ class Lifecycle:
                 raise ExecutionLayerError("live authorization is not valid: " + "; ".join(reasons))
         self._release_basis = release_basis
         self._authorization = authorization
-        self._live_verification_records = dict(live_verification or {})
+        # Keep the complete typed verification envelope. Bare record maps discard the broker,
+        # account and environment binding and can never authorize LIVE_ENABLED.
+        self._live_verification = live_verification
 
     @property
     def authorization(self) -> Optional[LiveAuthorization]:
@@ -393,36 +396,172 @@ class Lifecycle:
                      "no paper stage and no paper prerequisite anywhere on this path."),
         }
 
-    def live_verification_status(self) -> Dict[str, Any]:
-        """The state of the read-only broker verification this deployment has actually performed.
+    def live_verification_status(self, *, authorization: Optional[LiveAuthorization] = None,
+                                 now: datetime | None = None) -> Dict[str, Any]:
+        """Validate current real-account evidence and optionally bind it to owner authority.
 
-        Records may be supplied by an operator who ran the verification against the real account
-        out of band. When none are supplied the honest answer is NOT_VERIFIED - which is the state
-        this build is in, and which is why ``LIVE_READY_LOCKED`` is the ceiling rather than
-        ``LIVE_ENABLED``.
+        Activation accepts only the complete typed verification envelope. A dictionary of
+        individual records is insufficient because it loses the broker/account identity that
+        those records are supposed to prove. Evidence also expires.
         """
-        from .live_verification import EVIDENCE_KIND_LIVE_READ_ONLY, READ_ONLY_CHECKS
+        from .live_verification import (EVIDENCE_KIND_LIVE_READ_ONLY, READ_ONLY_CHECKS,
+                                        REQUIRED_INSTRUMENTS, LiveReadOnlyVerification)
 
-        records = self._live_verification_records or {}
+        verification = self._live_verification
+        if verification is None:
+            return {
+                "evidence_kind": EVIDENCE_KIND_LIVE_READ_ONLY,
+                "status": "NOT_VERIFIED", "verified": False,
+                "activation_verified": False, "authorization_bound": False,
+                "observed": {}, "missing_checks": list(READ_ONLY_CHECKS),
+                "reasons": ["no live read-only verification envelope is installed"],
+                "submits_no_order": True, "releases_capital": False,
+                "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
+            }
+        if not isinstance(verification, LiveReadOnlyVerification):
+            return {
+                "evidence_kind": EVIDENCE_KIND_LIVE_READ_ONLY,
+                "status": "NOT_VERIFIED", "verified": False,
+                "activation_verified": False, "authorization_bound": False,
+                "observed": {}, "missing_checks": list(READ_ONLY_CHECKS),
+                "reasons": ["bare verification records are refused; the typed broker/account "
+                            "verification envelope is required"],
+                "submits_no_order": True, "releases_capital": False,
+                "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
+            }
+
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        records = verification.records
         observed: Dict[str, Any] = {}
-        for name, record in sorted(records.items()):
-            if record.evidence_kind != EVIDENCE_KIND_LIVE_READ_ONLY or record.environment != "live":
-                observed[name] = "REFUSED: not live read-only evidence"
+        evidence_reasons: List[str] = []
+
+        try:
+            generated = datetime.fromisoformat(
+                str(verification.generated_at).replace("Z", "+00:00"))
+            if generated.tzinfo is None:
+                raise ValueError("generated_at is naive")
+            generated = generated.astimezone(timezone.utc)
+            age = (now - generated).total_seconds()
+            if age < -300:
+                evidence_reasons.append("live verification timestamp is implausibly in the future")
+            elif age > LIVE_VERIFICATION_MAX_AGE_SECONDS:
+                evidence_reasons.append(
+                    f"live verification is stale ({age:.0f}s > "
+                    f"{LIVE_VERIFICATION_MAX_AGE_SECONDS}s)")
+        except Exception:
+            evidence_reasons.append("live verification generated_at is unusable")
+
+        for name in READ_ONLY_CHECKS:
+            record = records.get(name)
+            if record is None:
+                observed[name] = "MISSING"
+                continue
+            if record.evidence_kind != EVIDENCE_KIND_LIVE_READ_ONLY:
+                observed[name] = "REFUSED: wrong evidence kind"
+                evidence_reasons.append(f"{name}: wrong evidence kind")
+                continue
+            try:
+                verified_at = datetime.fromisoformat(
+                    str(record.verified_at).replace("Z", "+00:00"))
+                if verified_at.tzinfo is None:
+                    raise ValueError("verified_at is naive")
+                verified_at = verified_at.astimezone(timezone.utc)
+                record_age = (now - verified_at).total_seconds()
+                if record_age < -300:
+                    observed[name] = "REFUSED: timestamp is in the future"
+                    evidence_reasons.append(f"{name}: timestamp is implausibly in the future")
+                    continue
+                if record_age > LIVE_VERIFICATION_MAX_AGE_SECONDS:
+                    observed[name] = "REFUSED: stale"
+                    evidence_reasons.append(f"{name}: evidence is stale ({record_age:.0f}s)")
+                    continue
+            except Exception:
+                observed[name] = "REFUSED: timestamp unusable"
+                evidence_reasons.append(f"{name}: verified_at is unusable")
                 continue
             observed[name] = "PASSED" if record.passed else f"FAILED: {record.detail[:160]}"
+            if not record.passed:
+                evidence_reasons.append(f"{name}: {record.detail[:160]}")
+
         missing = [name for name in READ_ONLY_CHECKS if name not in records]
+        evidence_reasons.extend(f"{name}: missing" for name in missing)
+        if verification.evidence_kind != EVIDENCE_KIND_LIVE_READ_ONLY:
+            evidence_reasons.append("verification envelope is not live read-only evidence")
+        if verification.environment != "live":
+            evidence_reasons.append(
+                f"verification environment {verification.environment!r} is not live")
+
+        evidence_verified = not evidence_reasons and not missing and verification.verified
+        binding_reasons: List[str] = []
+        authorization_bound = False
+        if authorization is None:
+            binding_reasons.append("no owner live authorization supplied for evidence binding")
+        else:
+            if authorization.environment != "live":
+                binding_reasons.append(
+                    f"authorization environment {authorization.environment!r} is not live")
+            if verification.broker_id != authorization.broker_id:
+                binding_reasons.append(
+                    f"verified broker {verification.broker_id!r} does not match authorized "
+                    f"broker {authorization.broker_id!r}")
+            if verification.account_id != authorization.account_id:
+                binding_reasons.append(
+                    f"verified account {verification.account_id!r} does not match authorized "
+                    f"account {authorization.account_id!r}")
+
+            broker_record = records.get("verify_broker_identity")
+            broker_obs = dict(getattr(broker_record, "observation", {}) or {})
+            if str(broker_obs.get("broker_id") or "") != authorization.broker_id:
+                binding_reasons.append("broker-identity observation does not match authorization")
+            if str(broker_obs.get("environment") or "") != "live":
+                binding_reasons.append("broker-identity observation did not prove the live environment")
+
+            account_record = records.get("verify_exact_account")
+            account_obs = dict(getattr(account_record, "observation", {}) or {})
+            if str(account_obs.get("account_id") or "") != authorization.account_id:
+                binding_reasons.append("account observation does not match authorization")
+
+            instruments_record = records.get("verify_required_instruments_available")
+            instruments_obs = dict(getattr(instruments_record, "observation", {}) or {})
+            available = {str(s).upper() for s in instruments_obs.get("available", ())}
+            required = set(REQUIRED_INSTRUMENTS)
+            if not required.issubset(available):
+                binding_reasons.append(
+                    f"live broker verification did not prove all required instruments: "
+                    f"{sorted(required - available)}")
+
+            entitlement_record = records.get("verify_live_market_data_entitlement")
+            entitlement_obs = dict(getattr(entitlement_record, "observation", {}) or {})
+            entitlement_symbols = {str(s).upper()
+                                   for s in entitlement_obs.get("symbols", ())}
+            if entitlement_obs.get("entitled") is not True:
+                binding_reasons.append("live market-data entitlement was not proven")
+            if not required.issubset(entitlement_symbols):
+                binding_reasons.append(
+                    f"live market-data entitlement does not cover: "
+                    f"{sorted(required - entitlement_symbols)}")
+
+            authorization_bound = not binding_reasons
+
+        activation_verified = bool(evidence_verified and authorization_bound)
         return {
             "evidence_kind": EVIDENCE_KIND_LIVE_READ_ONLY,
-            "status": ("VERIFIED" if not missing and all(
-                entry == "PASSED" for entry in observed.values()) else "NOT_VERIFIED"),
-            "verified": not missing and all(entry == "PASSED" for entry in observed.values()),
+            "status": "VERIFIED" if evidence_verified else "NOT_VERIFIED",
+            "verified": bool(evidence_verified),
+            "activation_verified": activation_verified,
+            "authorization_bound": authorization_bound,
+            "broker_id": verification.broker_id,
+            "account_id": verification.account_id,
+            "environment": verification.environment,
             "observed": observed,
             "missing_checks": missing,
+            "reasons": evidence_reasons + binding_reasons,
             "submits_no_order": True,
             "releases_capital": False,
-            "note": ("Twelve read-only checks against the intended real live brokerage account. "
-                     "None of them places, cancels or modifies an order, and none of them is a "
-                     "substitute for a recorded transcript."),
+            "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
+            "note": ("Twelve non-mutating checks against the intended real live account. "
+                     "Activation additionally requires exact broker/account binding to the owner "
+                     "authorization; recorded fixtures and bare record maps cannot satisfy it."),
         }
 
     def advance(self, to: Stage, *, actor: Actor, authorization: Optional[LiveAuthorization] = None,
@@ -456,27 +595,68 @@ class Lifecycle:
                     "readiness": readiness}
 
         if to is Stage.LIVE_ENABLED:
-            verdict = self.release_verdict(mode=mode, rule_ids=rule_ids)
-            if authorization is None:
+            effective_authorization = authorization or self._authorization
+            if authorization is not None and self._authorization is not None:
+                if authorization.content_hash() != self._authorization.content_hash():
+                    return {
+                        "advanced": False,
+                        "code": "LIVE_ENABLE_REFUSED_AUTHORIZATION_MISMATCH",
+                        "stage": self._stage.value,
+                        "reason": "supplied live authorization differs from the lifecycle-bound artifact",
+                    }
+            if effective_authorization is None:
                 return {"advanced": False, "code": "LIVE_ENABLE_REFUSED_NO_AUTHORIZATION",
                         "stage": self._stage.value, "reason": "no owner live authorization artifact"}
-            valid, reasons = authorization.is_valid(now)
+            valid, reasons = effective_authorization.is_valid(now)
             if not valid:
                 return {"advanced": False, "code": "LIVE_ENABLE_REFUSED_INVALID_AUTHORIZATION",
                         "stage": self._stage.value, "reason": "; ".join(reasons)}
+            if effective_authorization.environment != "live":
+                return {"advanced": False, "code": "LIVE_ENABLE_REFUSED_NON_LIVE_AUTHORIZATION",
+                        "stage": self._stage.value,
+                        "reason": "the owner authorization must name environment='live'"}
+
+            live_verification = self.live_verification_status(
+                authorization=effective_authorization, now=now)
+            if not live_verification["activation_verified"]:
+                return {
+                    "advanced": False,
+                    "code": "LIVE_ENABLE_REFUSED_LIVE_VERIFICATION",
+                    "stage": self._stage.value,
+                    "reason": "; ".join(live_verification["reasons"]),
+                    "live_verification": live_verification,
+                }
+
+            missing_identity = []
+            if config is None:
+                missing_identity.append("config")
+            if governor_profile_hash is None:
+                missing_identity.append("governor_profile_hash")
+            if missing_identity:
+                return {
+                    "advanced": False,
+                    "code": "LIVE_ENABLE_REFUSED_IDENTITY_EVIDENCE_MISSING",
+                    "stage": self._stage.value,
+                    "reason": "missing mandatory identity evidence: " + ", ".join(missing_identity),
+                }
+
+            from .identity import authorization_drift, current_identity
+
+            current = current_identity(config=dict(config),
+                                       governor_profile_hash=str(governor_profile_hash))
+            drifted, drift_reasons = authorization_drift(effective_authorization, current)
+            if drifted:
+                return {"advanced": False, "code": "LIVE_ENABLE_REFUSED_AUTHORIZATION_DRIFT",
+                        "stage": self._stage.value, "reason": "; ".join(drift_reasons)}
+
+            verdict = self.release_verdict(mode=mode, rule_ids=rule_ids)
             if not verdict.released:
                 return {"advanced": False, "code": LIVE_LOCKED_REFUSAL, "stage": self._stage.value,
                         "reason": "; ".join(verdict.reasons), "boundary": verdict.to_dict()}
-            # A bound approval is worthless if the thing it approved has since changed.
-            if config is not None and governor_profile_hash is not None:
-                from .identity import authorization_drift, current_identity
 
-                current = current_identity(config=dict(config),
-                                           governor_profile_hash=governor_profile_hash)
-                drifted, drift_reasons = authorization_drift(authorization, current)
-                if drifted:
-                    return {"advanced": False, "code": "LIVE_ENABLE_REFUSED_AUTHORIZATION_DRIFT",
-                            "stage": self._stage.value, "reason": "; ".join(drift_reasons)}
+            # Persist exactly the artifact that passed activation so the gateway's mutation permit
+            # remains attributable to the same owner authority.
+            self._authorization = effective_authorization
 
         self._stage = to
         return {"advanced": True, "code": "STAGE_ADVANCED", "stage": self._stage.value}
