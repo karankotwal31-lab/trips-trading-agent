@@ -717,6 +717,46 @@ class Lifecycle:
                 return {"advanced": False, "code": "LIVE_ENABLE_REFUSED_AUTHORIZATION_DRIFT",
                         "stage": self._stage.value, "reason": "; ".join(drift_reasons)}
 
+            data_status = self.market_data_verification_status(now=now)
+            if not data_status["verified"]:
+                return {
+                    "advanced": False,
+                    "code": "LIVE_ENABLE_REFUSED_MARKET_DATA_VERIFICATION",
+                    "stage": self._stage.value,
+                    "reason": "; ".join(data_status["reasons"]),
+                    "market_data_verification": data_status,
+                }
+
+            from .market_data import REQUIRED_PRODUCTION_SYMBOLS
+
+            data_verification = self._market_data_verification
+            data_binding_reasons: List[str] = []
+            if str(config.get("provider") or "") != data_verification.primary_provider:
+                data_binding_reasons.append("primary production data provider does not match config")
+            if str(config.get("secondary_provider") or "") != data_verification.secondary_provider:
+                data_binding_reasons.append("secondary production data provider does not match config")
+            if str(config.get("provider_source_kind") or "") != "real":
+                data_binding_reasons.append("primary config source kind is not real")
+            if str(config.get("secondary_source_kind") or "") != "real":
+                data_binding_reasons.append("secondary config source kind is not real")
+            if str(config.get("bar_interval") or "") != "60min":
+                data_binding_reasons.append("approved config bar interval is not 60min")
+            if set(str(symbol).upper() for symbol in config.get("symbols", ())) != set(
+                    REQUIRED_PRODUCTION_SYMBOLS):
+                data_binding_reasons.append("approved config symbol scope is not exactly SPY/QQQ/AAPL")
+            truth_cfg = dict(config.get("truth") or {})
+            if truth_cfg.get("require_independent_source_for_trade") is not True:
+                data_binding_reasons.append(
+                    "approved config does not require independent source confirmation")
+            if data_binding_reasons:
+                return {
+                    "advanced": False,
+                    "code": "LIVE_ENABLE_REFUSED_MARKET_DATA_BINDING",
+                    "stage": self._stage.value,
+                    "reason": "; ".join(data_binding_reasons),
+                    "market_data_verification": data_status,
+                }
+
             verdict = self.release_verdict(mode=mode, rule_ids=rule_ids)
             if not verdict.released:
                 return {"advanced": False, "code": LIVE_LOCKED_REFUSAL, "stage": self._stage.value,
