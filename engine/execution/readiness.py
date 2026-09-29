@@ -677,32 +677,64 @@ def _check_market_data(now: datetime) -> EngineeringEvidence:
 
 
 def _check_data_health(now: datetime) -> EngineeringEvidence:
-    """Execute the FAIL-CLOSED health logic against a deliberately bad series."""
+    """Execute the FAIL-CLOSED health logic against a deliberately bad series.
+
+    Evaluated at BOTH instants, because "fails closed" is a claim about every instant, not about
+    the one this process happened to run at:
+
+    * ``now`` - whatever time of day it is. The session may well be OPEN (it usually is, during
+      trading hours), and that is correct: the session is provable and the DATA is what is stale.
+      An earlier version of this check asserted the session was not open, which meant it passed at
+      3am and failed at 10am - a safety check whose result depended on the wall clock.
+    * an unprovable instant - a year beyond the calendar's validity window, where the session
+      genuinely cannot be known. There the session must NOT be asserted open.
+
+    The invariant in both cases is the same: stale data is unhealthy and never trade-eligible.
+    """
     from .market_data import evaluate_market_data
     from .provenance import DataSourceGuard
 
-    stale_end = now - timedelta(days=30)
-    stale = _closed_series(count=80, end=stale_end)
-    stale_provider = SimpleNamespace(
-        identity=SimpleNamespace(name="recorded_provider", source_family="recorded_family",
-                                 fixed_source_kind=None, can_request_realtime_entitlement=True),
-        source_kind="real", bars=lambda symbol, count=240: list(stale))
+    def _stale_provider():
+        stale = _closed_series(count=80, end=now - timedelta(days=30))
+        return SimpleNamespace(
+            identity=SimpleNamespace(name="recorded_provider", source_family="recorded_family",
+                                     fixed_source_kind=None, can_request_realtime_entitlement=True),
+            source_kind="real", bars=lambda symbol, count=240: list(stale))
+
     guard = DataSourceGuard()
-    verdict = evaluate_market_data(stale_provider, "SPY", now=now, max_age_minutes=120, min_bars=60,
-                                   data_guard=guard, allow_synthetic_analysis=False)
-    observation = {"healthy": verdict["healthy"], "reasons": verdict["reasons"],
+    verdict = evaluate_market_data(_stale_provider(), "SPY", now=now, max_age_minutes=120,
+                                   min_bars=60, data_guard=guard,
+                                   allow_synthetic_analysis=False)
+    # An instant beyond the calendar's validity window, where the session is genuinely unknowable.
+    # The default calendar is bounded by year, so this must clear it rather than merely cross a
+    # year boundary - an instant inside the window is, correctly, still answerable.
+    unprovable_now = now + timedelta(days=800)
+    unprovable = evaluate_market_data(_stale_provider(), "SPY", now=unprovable_now,
+                                      max_age_minutes=120, min_bars=60, data_guard=guard,
+                                      allow_synthetic_analysis=False)
+
+    observation = {
+        "at_now": {"healthy": verdict["healthy"], "reasons": verdict["reasons"],
                    "trade_eligible": verdict["trade_eligible"],
-                   "session_status": verdict["detail"]["session"]["status"]}
+                   "session_status": verdict["detail"]["session"]["status"]},
+        "at_unprovable_instant": {
+            "healthy": unprovable["healthy"], "trade_eligible": unprovable["trade_eligible"],
+            "session_status": unprovable["detail"]["session"]["status"]},
+    }
     problems = []
-    if verdict["healthy"]:
-        problems.append("a month-old series was reported healthy")
-    if verdict["trade_eligible"]:
-        problems.append("a month-old series was reported trade-eligible")
-    if verdict["detail"]["session"]["status"] == "OPEN":
+    for label, result in (("now", verdict), ("an unprovable instant", unprovable)):
+        if result["healthy"]:
+            problems.append(f"a month-old series was reported healthy at {label}")
+        if result["trade_eligible"]:
+            problems.append(f"a month-old series was reported trade-eligible at {label}")
+    # Only the unprovable instant may NOT claim an open session. At `now` an open session is a
+    # correct reading of the clock, and the staleness reason above is what must make it fail.
+    if unprovable["detail"]["session"]["status"] == "OPEN":
         problems.append("session truth was asserted open for an unprovable instant")
     return _record("data_health_fails_closed", passed=not problems,
-                   detail=("a stale series with no proven session is unhealthy and trade-ineligible, "
-                           "and absence of a provider credential never falls back to demo data")
+                   detail=("a stale series is unhealthy and never trade-eligible at every instant "
+                           "evaluated, and an unprovable instant never claims an open session; "
+                           "the result does not depend on the time of day the check is run")
                    if not problems else "; ".join(problems),
                    produced_by="execution.market_data.evaluate_market_data", observation=observation,
                    now=now)
