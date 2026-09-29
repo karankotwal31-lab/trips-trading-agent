@@ -17,19 +17,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Verify frozen v0.6 core
-        run: |
-          set -euo pipefail
-          sha256sum -c infra/core_v06.sha256
-      - name: Confirm interpreter
-        run: |
-          set -euo pipefail
-          python3 --version
-      - name: Verify infrastructure manifest
-        run: python3 infra/verify_infra.py
-      - name: Verify safety-suite integrity
-        run: python3 tests/suite_integrity.py
-      - name: All safety suites
-        run: python3 tests/run_all_tests.py
-      - name: Execution-layer live-lock status
-        run: PYTHONPATH=engine python3 engine/execution/status.py
+      # The gate is defined once in scripts/verify_all.sh so that a local run, a pre-push hook and
+      # CI all execute byte-identical checks. This workflow is deliberately left enabled even
+      # while Actions is blocked: a visibly failing check that says "this never ran" is honest,
+      # whereas silently skipping the gate would make every safety claim here unverified.
+      - name: Run Trip's safety gate
+        run: sh ./scripts/verify_all.sh

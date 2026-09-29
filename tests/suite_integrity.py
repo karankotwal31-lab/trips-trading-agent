@@ -1,13 +1,15 @@
-"""Suite integrity for Trip's safety tests.
+"""Suite and gate integrity for Trip's safety checks.
 
 The frozen core and the executable build are hash-pinned, but the TEST SUITE that substantiates
 every safety claim was not. That meant a safety test could be quietly weakened without tripping
-``EXECUTABLE_BUILD_LOCK``.
+``EXECUTABLE_BUILD_LOCK``. Nor was the gate itself pinned, which is worse: weakening
+``scripts/verify_all.sh`` would make every assertion behind it vacuous while the suite files
+stayed byte-identical.
 
-This module pins the suites to ``tests/approved_tests.json``. It is a tripwire, not a
-cryptographic guarantee: like ``approved_build.json`` it must be regenerated with ``--approve``
-when a suite legitimately changes, which makes any weakening an explicit, reviewable commit
-instead of a silent edit.
+This module pins the suites, the runners and the gate to ``tests/approved_tests.json``. It is a
+tripwire, not a cryptographic guarantee: like ``approved_build.json`` it must be regenerated with
+``--approve`` when something legitimately changes, which makes any weakening an explicit,
+reviewable commit instead of a silent edit.
 
 Run:
     python tests/suite_integrity.py            # verify
@@ -24,7 +26,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = Path(__file__).resolve().parent / "approved_tests.json"
 
-#: Every suite whose assertions justify a safety claim, plus the runners themselves.
+#: Every file whose integrity justifies a safety claim: the suites, the runners, and the GATE
+#: ITSELF. Pinning the gate matters as much as pinning the tests - a weakened gate makes every
+#: assertion behind it vacuous, and the CI workflow is the gate's other entry point.
 PINNED_FILES = (
     "tests/run_tests.py",
     "tests/run_all_tests.py",
@@ -35,6 +39,9 @@ PINNED_FILES = (
     "tests/test_execution_layer.py",
     "tests/test_live_gate_amendment.py",
     "infra/tests/test_cloud_shell.py",
+    "scripts/verify_all.sh",
+    "scripts/githooks/pre-push",
+    ".github/workflows/trips-safety-suites.yml",
 )
 
 
