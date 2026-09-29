@@ -139,11 +139,12 @@ def _live_dry_run_gateway(*, allow_mutation_probes: bool = True):
                       environment="live")
     gateway = UniversalBrokerGateway(
         adapter=adapter, governor=base.governor(),
-        lifecycle=Lifecycle(Stage.LIVE_ENABLED, FrozenLiveBoundary(),
-                            release_basis=amend.verified_basis(),
-                            authorization=base.signed_authorization(
-                                broker_id="alpaca", account_id=RECORDED_ACCOUNT,
-                                environment="TEST_ENV")),
+        lifecycle=amend.forced_live_lifecycle(
+            FrozenLiveBoundary(),
+            release_basis=amend.verified_basis(),
+            authorization=base.signed_authorization(
+                broker_id="alpaca", account_id=RECORDED_ACCOUNT,
+                environment="TEST_ENV")),
         registry=registry)
     return gateway, adapter, execution_channel, evidence
 
