@@ -23,23 +23,13 @@ PROFILES = {
             "research/tests/test_shadow_runner.py",
         ),
     },
-    "pr3": {
-        "prefixes": (),
+    "pr4": {
+        "prefixes": ("research/design/", "research/proposals/"),
         "exact": (
             ".github/workflows/research-validation.yml",
             "research/tools/check_scope.py",
-            "research/tests/test_docs_truth.py",
-            "research/DOC_DISCREPANCIES.md",
-            "README.md",
-            "HARDENING_REPORT.md",
-            "INFRASTRUCTURE_STATUS.md",
-            "NEON_DRY_RUN_REPORT.md",
-            "NEON_PRODUCTION_STATUS.md",
-            "STUDENT_ENGINE_ARCHITECTURE.md",
-            "STUDENT_HARD_STRESS_AUDIT.md",
-            "STUDENT_INTEGRATION_STATUS.md",
-            "STUDENT_V08_INTEGRATED_HARD_TEST.md",
-            "infra/README.md",
+            "research/tools/validate_proposals.py",
+            "research/tests/test_pr4_design.py",
         ),
     },
 }
