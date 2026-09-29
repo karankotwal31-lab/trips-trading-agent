@@ -24,8 +24,13 @@
 2. Run targeted risk/config tests or python tests/test_engine.py.
 3. Review the 20% correlated cap and SPY/QQQ/AAPL grouping as an owner risk decision.
 4. Run yourself: PYTHONPATH=engine python engine/approve_config.py
-5. Regenerate infra/core_v06.sha256 yourself using the repository's exact existing file order after
-   reviewing the core changes. Do not accept a partial hash list.
+5. Regenerate `infra/core_v06.sha256` yourself, preserving the exact existing path order:
+
+   ```sh
+   tmp="$(mktemp)" && awk '{print $2}' infra/core_v06.sha256 | xargs sha256sum > "$tmp" && mv "$tmp" infra/core_v06.sha256
+   ```
+
+   Run this only after reviewing the core changes. Do not accept a partial hash list.
 6. Run yourself: PYTHONPATH=engine python engine/approve_build.py
 7. Run yourself: python infra/approve_infra.py
 8. Run yourself: python tests/suite_integrity.py --approve
