@@ -36,6 +36,7 @@ from .contracts import (
     ORDER_INCOMPATIBLE,
     CapabilityError,
     ExecutionState,
+    ExecutionLayerError,
     IntentExpired,
     LedgerError,
     LiveMutationPermit,
@@ -300,6 +301,21 @@ class UniversalBrokerGateway:
 
     # -- scope defense in depth ------------------------------------------
 
+    def _owner_key_id(self) -> str:
+        """The owner key id this runtime is actually running under.
+
+        Read from the same lifecycle status the submit path uses. A placeholder key id on a permit
+        would mean a mutation was not traceable to any owner signature - which is the one claim a
+        permit exists to make - so a missing key id refuses instead.
+        """
+        status = self._lifecycle.authorization_status()
+        key_id = str(status.get("key_id") or status.get("authorization_key_id") or "").strip()
+        if not key_id:
+            raise ExecutionLayerError(
+                "no owner key id is available to bind a mutation permit to; refusing to act as an "
+                "unattributed authority")
+        return key_id
+
     def _scope_violation(self, intent: Any, holdings: Mapping[str, int],
                          authorized_quantity: Optional[int]) -> Optional[str]:
         if intent.symbol not in approved_symbol_scope():
@@ -512,9 +528,7 @@ class UniversalBrokerGateway:
             stage=mutation_stage(),
             broker_id=str(getattr(self._adapter, "broker_id", "")),
             account_id=str(observables.get("account_id") or ""),
-            authorization_key_id=str(self._lifecycle.authorization_status()
-                                     .get("key_id") or self._lifecycle.authorization_status()
-                                     .get("authorization_key_id") or "unbound"))
+            authorization_key_id=self._owner_key_id())
         try:
             ack = self._adapter.submit_order(client_order_id=cid, representation=representation,
                                              permit=permit)
@@ -583,7 +597,7 @@ class UniversalBrokerGateway:
                 stage=mutation_stage(),
                 broker_id=str(getattr(self._adapter, "broker_id", "")),
                 account_id=str(getattr(account, "account_id", "") or ""),
-                authorization_key_id="unbound")
+                authorization_key_id=self._owner_key_id())
         try:
             ack = self._adapter.cancel_order(broker_order_id=broker_order_id, reason=reason,
                                              permit=permit)

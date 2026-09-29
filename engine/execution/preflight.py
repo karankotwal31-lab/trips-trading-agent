@@ -39,8 +39,7 @@ from truth_guard import apply_cross_source_verification, cross_validate, validat
 
 from .contracts import approved_symbol_scope, canonical_json
 from .identity import authorization_drift, current_identity
-from .live_path import (LivePathViolation, assert_no_forbidden_trading_environment,
-                        assert_no_non_live_environment)
+from .live_path import LivePathViolation, assert_no_forbidden_trading_environment
 from .registry import AdapterRegistry
 from .session import SessionCalendar, SessionStatus
 

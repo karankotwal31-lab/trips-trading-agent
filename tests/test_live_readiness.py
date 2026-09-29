@@ -34,6 +34,7 @@ from execution.lifecycle import (OWNER_BLOCKING_ITEMS, Actor, Lifecycle,  # noqa
                                  Stage)
 from execution.live_path import LivePathViolation  # noqa: E402
 from execution.live_verification import READ_ONLY_CHECKS  # noqa: E402
+from execution.channels import BrokerChannelError  # noqa: E402
 
 #: A fixed instant, so timestamped evidence is reproducible.
 NOW = datetime(2026, 1, 2, 15, 30, tzinfo=timezone.utc)
@@ -768,6 +769,195 @@ def test_no_execution_module_names_a_paper_or_sandbox_prerequisite():
             if needle in text:
                 offenders.append(f"{path.name}: {needle}")
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# Regressions: bugs found by adversarial audit after the live-money-only change
+# ---------------------------------------------------------------------------
+
+
+def test_a_correctly_minted_permit_is_actually_accepted():
+    """Regression: the permit was checked against a channel attribute no channel ever set.
+
+    ``_authorize_mutation`` compared the permit's account against ``self._account_id``, which
+    lives on the ADAPTER, not the channel. Every channel therefore resolved it to ``""`` and
+    refused every legitimate permit - the live route was permanently inoperable, and the failure
+    looked like a security control rather than a bug.
+    """
+    from execution.channels import (AlpacaChannel, RecordedTransport, UpstoxChannel)
+    from execution.contracts import LiveMutationPermit, MutationWithoutPermit
+    from execution.readiness import ALPACA_TRANSCRIPTS, UPSTOX_TRANSCRIPTS
+
+    channels = [
+        AlpacaChannel(environment="recorded", api_key="r", api_secret="r",
+                      transport=RecordedTransport(dict(ALPACA_TRANSCRIPTS)),
+                      allow_mutation_probes=True),
+        UpstoxChannel(environment="recorded", access_token="r",
+                      transport=RecordedTransport(dict(UPSTOX_TRANSCRIPTS)),
+                      allow_mutation_probes=True),
+    ]
+    for channel in channels:
+        real = str(channel.account().account_id)
+        good = LiveMutationPermit(stage="LIVE_ENABLED", broker_id=channel.broker_id,
+                                  account_id=real, authorization_key_id="kid")
+        try:
+            channel._authorize_mutation(good)  # must NOT raise
+        except MutationWithoutPermit as exc:
+            raise AssertionError(
+                f"{channel.broker_id} refused a permit for its OWN account {real!r}: {exc}")
+        # ... and the binding is still real, not disabled by the fix.
+        for wrong in (LiveMutationPermit(stage="LIVE_ENABLED", broker_id=channel.broker_id,
+                                         account_id="SOMEONE-ELSE", authorization_key_id="kid"),
+                      LiveMutationPermit(stage="LIVE_LOCKED", broker_id=channel.broker_id,
+                                         account_id=real, authorization_key_id="kid")):
+            try:
+                channel._authorize_mutation(wrong)
+                raise AssertionError("an unbound permit must be refused")
+            except MutationWithoutPermit:
+                pass
+
+
+def test_a_channel_that_cannot_name_its_account_fails_closed():
+    """Identity comes from the broker. A channel that cannot report one may not be mutated."""
+    from execution.channels import RecordedTransport, UpstoxChannel
+    from execution.contracts import LiveMutationPermit, MutationWithoutPermit
+    from execution.readiness import UPSTOX_TRANSCRIPTS
+
+    channel = UpstoxChannel(environment="recorded", access_token="r",
+                            transport=RecordedTransport(dict(UPSTOX_TRANSCRIPTS)),
+                            allow_mutation_probes=True)
+    permit = LiveMutationPermit(stage="LIVE_ENABLED", broker_id="upstox", account_id="ACCT",
+                                authorization_key_id="kid")
+    channel.account = lambda: (_ for _ in ()).throw(BrokerChannelError("account unavailable"))
+    channel._verified_account_id = None
+    try:
+        channel._authorize_mutation(permit)
+        raise AssertionError("a channel that cannot name its account must refuse to mutate")
+    except MutationWithoutPermit as exc:
+        assert "unidentified" in str(exc) or "account it is talking to" in str(exc)
+
+
+def test_recent_orders_is_a_real_read_and_not_a_relabelled_open_orders_count():
+    """Regression: both channels' probe_recent_orders returned len(open_orders()).
+
+    That produced 'recent_orders SUPPORTED' evidence from an open-orders observation - a
+    capability record whose content was a duplicate of another capability's. Two capabilities
+    must come from two independent reads.
+    """
+    from execution.channels import AlpacaChannel, RecordedTransport, UpstoxChannel
+    from execution.conformance import ConformanceSuite
+    from execution.readiness import ALPACA_TRANSCRIPTS, UPSTOX_TRANSCRIPTS
+
+    for channel in (AlpacaChannel(environment="recorded", api_key="r", api_secret="r",
+                                  transport=RecordedTransport(dict(ALPACA_TRANSCRIPTS)),
+                                  allow_mutation_probes=True),
+                    UpstoxChannel(environment="recorded", access_token="r",
+                                  transport=RecordedTransport(dict(UPSTOX_TRANSCRIPTS)),
+                                  allow_mutation_probes=True)):
+        opened = {row["broker_order_id"] for row in channel.open_orders()}
+        recent = {row["broker_order_id"] for row in channel.recent_orders()}
+        assert recent, f"{channel.broker_id} reports no recent orders at all"
+        assert recent != opened, (
+            f"{channel.broker_id}: recent orders and open orders are the same set, so the "
+            f"recent_orders capability proves nothing the open_orders capability did not")
+        # And the probe must actually issue the read, not synthesise the number.
+        probe = channel.probe_recent_orders()
+        assert probe["recent_order_count"] == len(recent)
+        assert ConformanceSuite(broker_id=channel.broker_id, environment="recorded",
+                                channel=channel).run(now=NOW) is not None
+
+
+def test_the_mandated_open_and_recent_orders_check_can_actually_pass():
+    """Regression: ``recent_orders`` was unimplemented on both channels, so check 8 could not pass."""
+    from execution.live_verification import READ_ONLY_METHODS
+
+    assert "recent_orders" in READ_ONLY_METHODS
+    from execution.channels import AlpacaChannel, UpstoxChannel
+
+    for channel_type in (AlpacaChannel, UpstoxChannel):
+        # Resolved through the MRO, so an implementation on the shared base counts too - but the
+        # base default must be a refusal, not a working read.
+        resolved = getattr(channel_type, "recent_orders", None)
+        assert callable(resolved), f"{channel_type.__name__} has no recent_orders at all"
+        from execution.channels import _LiveBrokerChannel
+
+        if "recent_orders" not in channel_type.__dict__:
+            assert resolved is _LiveBrokerChannel.recent_orders, (
+                f"{channel_type.__name__} does not implement the recent-orders read; it inherits "
+                f"the base refusal, so the mandated open-and-recent-orders check cannot pass")
+
+
+def test_no_mutation_permit_is_ever_minted_unattributed():
+    """Regression: cancellations carried a hardcoded authorization_key_id of 'unbound'."""
+    import inspect
+
+    from execution import gateway
+
+    source = inspect.getsource(gateway)
+    assert '"unbound"' not in source and "'unbound'" not in source, (
+        "a permit must never be minted with a placeholder key id; that would mean a mutation "
+        "was not traceable to any owner signature")
+    # Every permit construction goes through the one bound helper.
+    constructions = source.count("LiveMutationPermit(")
+    bound = source.count("authorization_key_id=self._owner_key_id()")
+    assert constructions == bound, (
+        f"{constructions} permit constructions but only {bound} bound to an owner key id")
+
+
+def test_a_gateway_with_no_owner_key_cannot_transmit():
+    """A LIVE_ENABLED gateway with a releasing boundary and no owner key must refuse.
+
+    This state is unreachable in production - a live authorization cannot verify without the key -
+    so the fixture used to build one. Constructing it directly must now fail closed rather than
+    act as an authority nobody can name.
+    """
+    from execution.contracts import ExecutionLayerError
+
+    sys.path.insert(0, str(TESTS_DIR))
+    import test_execution_layer as base
+
+    with base.isolated_store(), base.owner_key_unconfigured():
+        now = datetime.now(timezone.utc)
+        order = base.intent()
+        gateway, adapter = base.build_gateway(stage=Stage.LIVE_ENABLED,
+                                             boundary=base.ReleasingBoundary())
+        try:
+            base.submit(gateway, base.permissive_report(order, now=now), order=order)
+            raise AssertionError("an unattributed gateway must not reach the broker")
+        except ExecutionLayerError as exc:
+            assert "unattributed" in str(exc)
+        assert adapter.submitted == []
+
+
+def test_live_read_only_verification_reports_its_own_evidence_kind():
+    """Regression: summarize() branched on hasattr(evidence_kind), which was never True."""
+    from execution.live_verification import (EVIDENCE_KIND_LIVE_READ_ONLY,
+                                            LiveReadOnlyBrokerVerifier, LiveReadOnlyVerification)
+
+    verification = LiveReadOnlyVerification(broker_id="b", account_id="A", environment="live",
+                                            generated_at=NOW.isoformat())
+    assert verification.evidence_kind == EVIDENCE_KIND_LIVE_READ_ONLY
+    summary = LiveReadOnlyBrokerVerifier.summarize(None, verification)
+    assert summary["evidence_kind"] == EVIDENCE_KIND_LIVE_READ_ONLY
+    assert summary["releases_capital"] is False
+
+
+def test_every_read_only_method_the_verifier_requires_is_implemented_by_a_real_channel():
+    """A verification target must not be missing the reads the protocol promises.
+
+    A method that merely raises is a refusal, not an implementation - so inherited base defaults
+    do not satisfy this.
+    """
+    from execution.channels import AlpacaChannel
+    from execution.live_verification import READ_ONLY_METHODS
+
+    refusals = {"recent_orders", "instrument", "restrictions", "market_data_entitlement"}
+    for method in READ_ONLY_METHODS:
+        assert hasattr(AlpacaChannel, method), f"AlpacaChannel has no {method} at all"
+        if method in refusals:
+            assert method in AlpacaChannel.__dict__, (
+                f"AlpacaChannel inherits the base refusal for {method}, so that mandated check "
+                f"can never pass against the only US-equities-capable broker")
 
 
 if __name__ == "__main__":

@@ -178,6 +178,11 @@ class LiveReadOnlyVerification:
         _aware(self.generated_at, "generated_at")
 
     @property
+    def evidence_kind(self) -> str:
+        """Always the live read-only kind. A recorded fixture cannot even construct this object."""
+        return EVIDENCE_KIND_LIVE_READ_ONLY
+
+    @property
     def passed_checks(self) -> Tuple[str, ...]:
         return tuple(name for name in READ_ONLY_CHECKS
                      if name in self.records and self.records[name].passed)
@@ -418,8 +423,7 @@ class LiveReadOnlyBrokerVerifier:
 
     def summarize(self, verification: LiveReadOnlyVerification) -> Dict[str, Any]:
         return {
-            "evidence_kind": verification.evidence_kind if hasattr(verification, "evidence_kind")
-            else EVIDENCE_KIND_LIVE_READ_ONLY,
+            "evidence_kind": verification.evidence_kind,
             "releases_capital": False,
             "verified": verification.verified,
             "passed": list(verification.passed_checks),
