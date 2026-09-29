@@ -1,5 +1,9 @@
 # Trip's v0.7 — Neon Cloud Paper Shell (Activated State Layer)
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 Trip's v0.7 wraps the **unchanged, frozen v0.6 paper-trading core** with a durable Neon/PostgreSQL state shell. The trading architecture, Constitution, Truth Layer, Forge Gate, risk engine, execution simulation, Guardian, Evolution, Decision Mirror and Supervisor Counsel remain byte-for-byte protected by `infra/core_v06.sha256`.
 
 ## Activated infrastructure
@@ -19,13 +23,13 @@ Trip's v0.7 wraps the **unchanged, frozen v0.6 paper-trading core** with a durab
 
 The durable state layer is live, but **scheduled market cycles are not active yet**. The provider configuration is still `DEMO`; no demo cycle has been committed to authoritative Neon history. A dedicated GitHub trading repository and its server-side secrets are still required before hourly orchestration can be enabled. Vercel's connected deployment action was unavailable at runtime, so the dashboard is not claimed as deployed.
 
-There is **no live-money execution path**. Strategy verdict remains **UNPROVEN**.
+At this historical v0.7 checkpoint, no live-money execution layer had yet been shipped. The current execution route and authority boundary are governed by D1 above.
 
 ---
 
 # Trip's v0.6 — Verified Control Center
 
-Trip's is a **paper-only** market-analysis and trading-research agent with deterministic data-truth, risk, execution-simulation, Guardian, Evolution, Decision Mirror and Supervisor controls. v0.6 adds a production-style **read-only interactive dashboard** without weakening any v0.5 safety boundary.
+Historical v0.6 description: Trip's was a **paper-only** market-analysis and trading-research agent with deterministic data-truth, risk, execution-simulation, Guardian, Evolution, Decision Mirror and Supervisor controls. v0.6 adds a production-style **read-only interactive dashboard** without weakening any v0.5 safety boundary.
 
 ## What v0.6 adds
 
@@ -43,7 +47,7 @@ Trip's is a **paper-only** market-analysis and trading-research agent with deter
 
 ## Non-negotiable execution boundary
 
-There is **no live-money broker execution path**. The dashboard has **zero execution authority** and exposes no mutation endpoints. Health PASS is not trade permission. Supervisor advice remains advisory only. Synthetic/demo data can support analysis but cannot authorize a current-market paper trade.
+Historical v0.6 boundary: there was **no live-money broker execution path** in that release. The dashboard has **zero execution authority** and exposes no mutation endpoints. Health PASS is not trade permission. Supervisor advice remains advisory only. Synthetic/demo data can support analysis but cannot authorize a current-market paper trade.
 
 ## Validated trading scope
 
@@ -51,7 +55,7 @@ There is **no live-money broker execution path**. The dashboard has **zero execu
 - 60-minute bars
 - allowlist: `SPY`, `QQQ`, `AAPL`
 - structured OHLCV input
-- paper execution only
+- historical v0.6 simulated/paper execution only (not a current broker stage)
 
 Options, futures, FX, crypto, short selling, leverage and unvalidated symbols require separate instrument-aware risk/execution models and review.
 
