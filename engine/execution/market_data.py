@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from market_time import closed_bars_only
 from providers import Bar, get_provider
-from truth_guard import DataVerdict, validate_bars
+from truth_guard import DataVerdict, cross_validate, validate_bars
 
 from .contracts import ExecutionLayerError, canonical_json
 from .exchange_calendar import default_us_equity_calendar
@@ -374,6 +374,89 @@ def evaluate_market_data(provider: Any, symbol: str, *, now: Optional[datetime] 
     return result
 
 
+def verify_production_market_data(
+        primary: Any, secondary: Any, *, now: Optional[datetime] = None,
+        count: int = 240, min_bars: int = 60,
+        capability_max_age_minutes: int = 7 * 24 * 60,
+        data_guard: Optional[DataSourceGuard] = None) -> ProductionMarketDataVerification:
+    """Verify two independent provider families against the existing frozen Truth contract.
+
+    This is activation/readiness evidence, not an order-time freshness verdict. The evidence object
+    itself expires quickly in Lifecycle; the latest returned closed bar may be older across a
+    weekend/holiday. Every actual order still runs the stricter frozen per-trade freshness/session
+    checks in preflight.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    p_identity = getattr(primary, "identity", None)
+    s_identity = getattr(secondary, "identity", None)
+    if p_identity is None or s_identity is None:
+        raise MarketDataError("both production providers must expose identity")
+    p_name = str(getattr(p_identity, "name", "") or "").strip()
+    s_name = str(getattr(s_identity, "name", "") or "").strip()
+    p_family = str(getattr(p_identity, "source_family", "") or "").strip()
+    s_family = str(getattr(s_identity, "source_family", "") or "").strip()
+    if not p_name or not s_name or not p_family or not s_family:
+        raise MarketDataError("both production providers must expose non-empty identity")
+    if p_family == s_family:
+        raise MarketDataError("production data providers must be independent source families")
+    if getattr(primary, "source_kind", None) != "real":
+        raise MarketDataError(f"primary provider {p_name!r} is not source_kind='real'")
+    if getattr(secondary, "source_kind", None) != "real":
+        raise MarketDataError(f"secondary provider {s_name!r} is not source_kind='real'")
+    if getattr(primary, "interval", APPROVED_INTERVAL) != APPROVED_INTERVAL:
+        raise MarketDataError(f"primary provider interval must be {APPROVED_INTERVAL}")
+    if getattr(secondary, "interval", APPROVED_INTERVAL) != APPROVED_INTERVAL:
+        raise MarketDataError(f"secondary provider interval must be {APPROVED_INTERVAL}")
+
+    guard = data_guard or DataSourceGuard(
+        approved_sources=(p_name, s_name), approved_families=(p_family, s_family))
+    records: Dict[str, ProductionDataRecord] = {}
+
+    for symbol in REQUIRED_PRODUCTION_SYMBOLS:
+        try:
+            p_bars, _ = closed_bar_series(primary, symbol, count=count)
+            s_bars, _ = closed_bar_series(secondary, symbol, count=count)
+            p_verdict = truth_verdict(
+                primary, symbol, p_bars, max_age_minutes=capability_max_age_minutes,
+                min_bars=min_bars, allow_synthetic_analysis=False)
+            s_verdict = truth_verdict(
+                secondary, symbol, s_bars, max_age_minutes=capability_max_age_minutes,
+                min_bars=min_bars, allow_synthetic_analysis=False)
+
+            guard.admit(primary.source_record(), purpose=DataPurpose.TRADE_ELIGIBILITY)
+            guard.admit(secondary.source_record(), purpose=DataPurpose.TRADE_ELIGIBILITY)
+            cross = cross_validate(
+                p_verdict, p_bars, s_verdict, s_bars,
+                max_ohlc_deviation_pct=0.005,
+                max_timestamp_skew_minutes=5.0,
+                min_cross_source_bars=3)
+            passed = bool(p_verdict.trusted_for_trade and s_verdict.trusted_for_trade
+                          and cross.get("passed"))
+            reasons = []
+            if not p_verdict.trusted_for_trade:
+                reasons.append(f"{p_name}: " + "; ".join(p_verdict.reasons[:3]))
+            if not s_verdict.trusted_for_trade:
+                reasons.append(f"{s_name}: " + "; ".join(s_verdict.reasons[:3]))
+            if not cross.get("passed"):
+                reasons.append(f"cross_source: {cross.get('reason', 'failed')}")
+            records[symbol] = ProductionDataRecord(
+                symbol=symbol, passed=passed,
+                detail="verified" if passed else " | ".join(reasons),
+                primary_integrity_hash=p_verdict.integrity_hash,
+                secondary_integrity_hash=s_verdict.integrity_hash,
+                cross_source=cross)
+        except Exception as exc:
+            records[symbol] = ProductionDataRecord(
+                symbol=symbol, passed=False,
+                detail=f"{type(exc).__name__}: {exc}")
+
+    return ProductionMarketDataVerification(
+        generated_at=now.isoformat(),
+        primary_provider=p_name, primary_family=p_family,
+        secondary_provider=s_name, secondary_family=s_family,
+        interval=APPROVED_INTERVAL, records=records)
+
+
 def closed_60min_bars_evidence(bars: Sequence[Bar], *, now: Optional[datetime] = None,
                                close_lag_seconds: float = 20.0) -> Dict[str, Any]:
     """Deterministic proof that a series is 60-minute bars and that every one of them is closed.
@@ -412,12 +495,19 @@ __all__ = [
     "APPROVED_INTERVAL",
     "PROVIDER_CREDENTIAL_ENV",
     "PROVIDER_SOURCE_KINDS",
+    "PRODUCTION_DATA_EVIDENCE_KIND",
+    "PRODUCTION_DATA_EVIDENCE_VERSION",
+    "PRODUCTION_DATA_MAX_AGE_SECONDS",
+    "REQUIRED_PRODUCTION_SYMBOLS",
     "MarketDataHealth",
+    "ProductionDataRecord",
     "ProductionMarketDataProvider",
+    "ProductionMarketDataVerification",
     "ProviderCredentialMissing",
     "closed_60min_bars_evidence",
     "closed_bar_series",
     "evaluate_market_data",
     "provider_credential_status",
     "truth_verdict",
+    "verify_production_market_data",
 ]
