@@ -1,0 +1,149 @@
+diff --git a/docs/TRIPS_CONSTITUTION.md b/docs/TRIPS_CONSTITUTION.md
+--- a/docs/TRIPS_CONSTITUTION.md
++++ b/docs/TRIPS_CONSTITUTION.md
+@@ -14,7 +14,7 @@
+ 10. **SEPARATE_ANALYSIS_FROM_EXECUTION** — AI interprets and challenges; deterministic gates own execution authority.
+ 11. **NO_SILENT_MODEL_DRIFT** — Strategy/risk changes require versioning, tests, review and a recorded configuration fingerprint.
+ 12. **ESCALATE_UNKNOWN_UNKNOWNS** — Novel/conflicting conditions are escalated instead of guessed.
+-13. **PAPER_FIRST** — This build cannot submit live-money orders.
++13. **PAPER_FIRST** — Current enforced mode remains paper; this build cannot submit live-money orders while this rule is in force. The additive execution route may be live-money-only in design, but design does not grant authority.
+ 14. **CLOSED_BARS_ONLY** — Signals may use only fully closed bars; incomplete candles cannot authorize entries.
+ 15. **CAUSAL_EXECUTION** — A signal formed at a bar close cannot be filled retroactively at that same close.
+ 16. **STATE_INTEGRITY** — Corrupt or inconsistent critical state fails closed; it is never silently reset.
+diff --git a/engine/capability_registry.json b/engine/capability_registry.json
+--- a/engine/capability_registry.json
++++ b/engine/capability_registry.json
+@@ -3,7 +3,7 @@
+   "project": "Trip's",
+   "release": "0.6",
+   "supported": {
+-    "execution": "paper-only",
++    "execution": "mode=paper; additive live-money-only route present; live transmission locked",
+     "instrument_scope": "US equity cash, long-only",
+     "bar_interval": "60min",
+     "symbols": [
+@@ -29,7 +29,7 @@
+     "dashboard_server": "local-only by default with CSP/security headers and GET/HEAD-only static serving"
+   },
+   "not_supported": [
+-    "live-money order submission",
++    "live-money order submission while PAPER_FIRST/config/risk live locks remain in force",
+     "options/futures/FX/crypto execution",
+     "short selling",
+     "unvalidated symbols",
+diff --git a/engine/execution/lifecycle.py b/engine/execution/lifecycle.py
+--- a/engine/execution/lifecycle.py
++++ b/engine/execution/lifecycle.py
+@@ -2,10 +2,14 @@
+ 
+ RESEARCH -> BACKTEST -> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED
+ 
+-There is no PAPER stage. Trip's is a live-money-only execution system: paper and sandbox broker
+-execution are not prerequisites, are not on the path to LIVE_ENABLED, and are not represented as
+-anywhere on it. A recorded fixture, mock or simulation is an engineering test and never a trading
+-environment; it creates no portfolio state and satisfies no readiness requirement.
++Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED);
++frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only
++with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data.
++Strategy verdict: UNPROVEN.
++
++The stage machine below describes the additive execution route. A recorded fixture, mock or
++simulation is an engineering test and never a trading environment; it creates no portfolio state
++and satisfies no readiness requirement.
+ 
+ Nothing promotes itself. Student, Evolution, Strategy, Supervisor, Guardian, broker
+ connectivity and passing tests are NOT promotion authorities. LIVE_ENABLED requires an explicit
+diff --git a/engine/execution/readiness.py b/engine/execution/readiness.py
+--- a/engine/execution/readiness.py
++++ b/engine/execution/readiness.py
+@@ -938,7 +938,9 @@ def live_readiness_report(*, now: Optional[datetime] = None) -> Dict[str, Any]:
+             "submits_no_order": True,
+         },
+         "releases_capital": False,
+-        "note": ("Trip's is live-money-only. There is no paper stage, no paper endpoint and no "
+-                 "paper credential. Recorded fixtures are engineering tests, not trading "
+-                 "environments, and neither evidence kind releases capital."),
++        "note": ("Current enforced state: mode=paper; live transmission locked "
++                 "(LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in "
++                 "force. The execution layer is designed live-money-only with no simulated-broker "
++                 "stage; forward evidence comes from no-order shadow runs on real data. Strategy "
++                 "verdict: UNPROVEN. Recorded fixtures release no capital."),
+     }
+diff --git a/engine/execution/status.py b/engine/execution/status.py
+--- a/engine/execution/status.py
++++ b/engine/execution/status.py
+@@ -251,10 +251,12 @@ def build_status() -> dict:
+         },
+         "safety_suite_integrity": _suite_integrity(),
+         "note": (
+-            "Trip's is a LIVE-MONEY-ONLY execution system. The stage order is RESEARCH -> BACKTEST "
+-            "-> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED; there is no paper stage, "
+-            "no paper endpoint and no paper credential anywhere on the route, and there is no "
+-            "runtime fallback between environments. Recorded transcripts, mocks and simulations "
++            "Current enforced state: mode=paper; live transmission locked "
++            "(LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. "
++            "The execution layer is designed live-money-only with no simulated-broker stage; "
++            "forward evidence comes from no-order shadow runs on real data. Strategy verdict: "
++            "UNPROVEN. The stage order is RESEARCH -> BACKTEST -> SHADOW -> LIVE_LOCKED -> "
++            "LIVE_READY_LOCKED -> LIVE_ENABLED. Recorded transcripts, mocks and simulations "
+             "are engineering tests, not trading environments: they create no portfolio state and "
+             "prove implementation behaviour only (RECORDED_CONTRACT_CONFORMANCE). Evidence about "
+             "the real account comes from LIVE_READ_ONLY_BROKER_VERIFICATION, which submits no "
+diff --git a/.github/workflows/trips-agent.yml b/.github/workflows/trips-agent.yml
+--- a/.github/workflows/trips-agent.yml
++++ b/.github/workflows/trips-agent.yml
+@@ -45,4 +45,5 @@ jobs:
+ 
+ # IMPORTANT: This workflow validates repository code/config on an ephemeral runner.
+-# It is not the authoritative 24x7 live-state Guardian. The host-local health_daemon.py
+-# must run beside a durable private runtime state backend before autonomous scheduled paper cycles resume.
++# It is not the authoritative 24x7 live-state Guardian and is not a trading scheduler.
++# Current enforced mode remains paper and live transmission remains locked; forward evidence is
++# accumulated by the separate no-order shadow runner on a durable host.
+diff --git a/.github/workflows/trips-live-readiness.yml b/.github/workflows/trips-live-readiness.yml
+--- a/.github/workflows/trips-live-readiness.yml
++++ b/.github/workflows/trips-live-readiness.yml
+@@ -2,9 +2,12 @@ name: Trips Live Readiness
+ 
+ # NON-MUTATING BY CONSTRUCTION.
+ #
+-# Trip's is a live-money-only execution system. There is no paper stage, no paper endpoint and no
+-# paper credential, and this workflow therefore does not trade at all - not even against a broker's
+-# simulated environment. It performs only local, non-mutating validation:
++# Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED);
++# frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only
++# with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data.
++# Strategy verdict: UNPROVEN.
++#
++# This workflow therefore does not trade at all. It performs only local, non-mutating validation:
+ #
+ #   * the frozen v0.6 core still hashes byte-for-byte to infra/core_v06.sha256;
+ #   * the infrastructure manifest still matches what an owner approved;
+diff --git a/tests/test_engine.py b/tests/test_engine.py
+--- a/tests/test_engine.py
++++ b/tests/test_engine.py
+@@ -786,9 +786,18 @@
+ 
+-def test_capability_registry_does_not_claim_live_execution_or_guaranteed_profit():
+-    registry=json.loads((ROOT/"engine"/"capability_registry.json").read_text())
+-    assert registry["supported"]["execution"]=="paper-only"
+-    text=" ".join(registry["not_supported"]).lower()
+-    assert "live-money" in text
+-    assert "guaranteed profitability" in text
++def test_capability_registry_states_locked_live_route_without_weakening_paper_first():
++    registry=json.loads((ROOT/"engine"/"capability_registry.json").read_text())
++    execution=registry["supported"]["execution"].lower()
++    assert "mode=paper" in execution
++    assert "live-money-only" in execution
++    assert "locked" in execution
++    text=" ".join(registry["not_supported"]).lower()
++    assert "live-money" in text
++    assert "guaranteed profitability" in text
++    constitution=(ROOT/"docs"/"TRIPS_CONSTITUTION.md").read_text()
++    paper_first=next(line for line in constitution.splitlines() if "**PAPER_FIRST**" in line)
++    assert "cannot submit live-money orders while this rule is in force" in paper_first
++    assert "design does not grant authority" in paper_first
++    cfg=json.loads((ROOT/"engine"/"config.json").read_text())
++    assert cfg["mode"]=="paper"
+ 
+ 
