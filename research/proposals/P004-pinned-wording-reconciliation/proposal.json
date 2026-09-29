@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "P004",
+  "title": "pinned-wording-reconciliation",
+  "patch": "patch.diff",
+  "test_commands": [
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_engine as t; t.test_capability_registry_states_locked_live_route_without_weakening_paper_first()"
+    ]
+  ]
+}
