@@ -1,6 +1,6 @@
 {
   "files": {
-    ".github/workflows/trips-safety-suites.yml": "6798a7163eee4c47ae8c6b454a6c6ab9bbd24da66b29c59203273b294b9f5a6c",
+    ".github/workflows/trips-safety-suites.yml": "c5e160323cd7d488933490c8881b358a93a64bf24e2fda3435adb437b39d156b",
     "infra/tests/test_cloud_shell.py": "c039e53598817747682580b837da00ab038eb8af49ea8c8b9939584e525c4491",
     "scripts/githooks/pre-push": "86fdb49591f93447acc907b6e792df85c6e17f6087a81ba6695bea32c871cee2",
     "scripts/verify_all.sh": "0fcc8bca5ec97ff1c72f0eab6c5edf9e5d21844e7703d7e6475629e1aa6bdf7d",
@@ -13,6 +13,6 @@
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3"
   },
-  "manifest_hash": "d5e72a7287fde6af14153a6d963336d55a46d76604c4b66ff34b09a986604b81",
+  "manifest_hash": "6cb4b86ea62d090229eb691d4a9ba01b142cd965229b92bf487f2044ccdc1dac",
   "schema_version": 1
 }
