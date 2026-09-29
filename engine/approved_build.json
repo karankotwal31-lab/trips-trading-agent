@@ -19,7 +19,7 @@
     "engine/decision_mirror.py": "5b14670a4d3ed949c8dd7ce42d1ba5809b2678261cfa758be8576b6592490d3c",
     "engine/diagnostics_engine.py": "007cd398efc8e7d3cece7646a5af0b935986948b75c833c14855391ac098e629",
     "engine/evolution_engine.py": "be6e3dc52e3de4e5778d20b0c305f2cc5d370f708bc2adc0c9f02b93282ebda5",
-    "engine/execution/__init__.py": "7717e02f1ccd9d3c87effa998a57dd356fa3d54fda62926cfec81d29704ed23a",
+    "engine/execution/__init__.py": "8e7fd63f142c8371cd104994bffbb9f085cd59b8e2e45d00403aede3a76b1bc1",
     "engine/execution/adapters.py": "c905f8e8f02e6fa1df1892eda2d0b274cb5d6dad8f9d79ecb7f46b587f78ed05",
     "engine/execution/amendment.py": "d86b1c61483b3762e458d34ce60c7c264f2b86bcad648c37a32a73abebf2be2d",
     "engine/execution/capital_governor.py": "c4f1869ca58f03b059ddbfa10816f354bda070e90babdc1dbd578f3571841a96",
@@ -69,9 +69,10 @@
     "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e",
     "scripts/sign_owner_artifact.py": "3204048c7ee413b465800477165a656429943ed61407c2f302e1f4cb6bd3b438",
     "engine/execution/production_data.py": "fd1af574972da45e44e3509e8b9c1e180ae54960533ba9ed370a0d71d3f75342",
-    "engine/execution/production_runtime.py": "edb90cfe952e8d20190bd2d439606e6988e05f9e10e469294244d97d73db62d7",
-    "scripts/trips_external_readiness.py": "863755e1c660c03aa2252e8eb3240857a047dd061b2458becde7c3f836c3a4d1"
+    "engine/execution/production_runtime.py": "f230f1f433aef76c5104b7b1f6a552cdd86df557dc9f2823286499f3be7a1ffa",
+    "scripts/trips_external_readiness.py": "863755e1c660c03aa2252e8eb3240857a047dd061b2458becde7c3f836c3a4d1",
+    "engine/execution/realtime_providers.py": "c18f70a0aadcc093ea8f941d6b450effcd657bb4e578005683edaf2e1abd99b7"
   },
-  "manifest_hash": "2ebb1ea1185e105f2dc6c62ff18be3288b8429e6f7855bdff99b880e85147fa9",
+  "manifest_hash": "743e8ebd385c4796004d22234df3e694f5b342bbcef9a9f26be45ba7fac3d39f",
   "schema_version": 2
 }
