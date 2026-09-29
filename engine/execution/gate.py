@@ -136,6 +136,7 @@ class LiveBoundaryVerdict:
     constitution_rule_ids: Tuple[str, ...]
     mode: str = "unknown"
     permitted_modes: Tuple[str, ...] = ()
+    risk_permitted_modes: Tuple[str, ...] = ()
     prohibition_rules_present: Tuple[str, ...] = ()
     authorization_rules_present: Tuple[str, ...] = ()
 
@@ -148,18 +149,29 @@ class LiveBoundaryVerdict:
             "constitution_rule_ids": list(self.constitution_rule_ids),
             "mode": self.mode,
             "permitted_modes": list(self.permitted_modes),
+            "risk_permitted_modes": list(self.risk_permitted_modes),
             "prohibition_rules_present": list(self.prohibition_rules_present),
             "authorization_rules_present": list(self.authorization_rules_present),
             "blockers": self.blockers(),
         }
 
     def blockers(self) -> List[str]:
-        """The independent frozen facts that are withholding release, named by category."""
+        """The independent frozen facts that are withholding release, named by category.
+
+        Three frozen facts are checked separately because they are three separate code sites, and
+        lifting only some of them yields a system that claims a capability it does not have:
+
+        1. the Constitution's ``PAPER_FIRST`` rule;
+        2. the frozen ``config_guard`` mode restriction;
+        3. the frozen Risk engine's ``forge_gate`` ``paper_mode`` check.
+        """
         found: List[str] = []
         if self.prohibition_rules_present and not self.authorization_rules_present:
             found.append("CONSTITUTION_PROHIBITION_RULE")
         if self.mode not in self.permitted_modes:
             found.append("CONFIG_GUARD_MODE_RESTRICTION")
+        if self.mode not in self.risk_permitted_modes:
+            found.append("RISK_MODE_RESTRICTION")
         if not self.frozen_core_verified:
             found.append("FROZEN_CORE_DIGEST_UNVERIFIED")
         return found
@@ -227,9 +239,79 @@ def frozen_config_guard_permits(mode: str) -> Dict[str, Any]:
     return {"permitted": True, "mode": mode, "reason": None}
 
 
-def frozen_permitted_modes(candidates: Sequence[str] = MODE_CANDIDATES) -> Tuple[str, ...]:
+def frozen_config_guard_permitted_modes(
+        candidates: Sequence[str] = MODE_CANDIDATES) -> Tuple[str, ...]:
     """Derive the mode set the frozen config_guard actually permits. No hardcoding."""
     return tuple(mode for mode in candidates if frozen_config_guard_permits(mode)["permitted"])
+
+
+def frozen_risk_permits(mode: str) -> Dict[str, Any]:
+    """Ask the FROZEN Risk engine whether a mode is permitted, by actually running its gate.
+
+    THIRD independent blocker, found on review: ``forge_gate`` opens with
+    ``GateCheck("paper_mode", config.get("mode") == "paper", ...)``, so the frozen Risk engine
+    refuses every non-paper mode in its own right. Amending the Constitution and config_guard
+    without amending this check would produce a system whose own risk gate still vetoes live mode
+    while reporting every other precondition satisfied.
+
+    As with the config_guard probe, this executes the real frozen code so it cannot drift from
+    the frozen rule, and a missing ``paper_mode`` check is treated as a refusal.
+    """
+    import copy
+    import json
+
+    from risk import forge_gate
+
+    try:
+        probe = json.loads((_ENGINE_DIR / "config.json").read_text())
+    except Exception as exc:  # pragma: no cover - unreadable config must not read as permissive
+        return {"permitted": False, "mode": mode,
+                "reason": f"approved config is unreadable: {type(exc).__name__}"}
+    probe = copy.deepcopy(probe)
+    probe["mode"] = mode
+    # Every other input is deliberately permissive; only the paper_mode check is read back.
+    try:
+        report = forge_gate(
+            config=probe, provider_name="live-boundary-probe", bars_count=10 ** 6,
+            signal_score=0.0, conflict=False, stale=False, positions={}, pending_entries={},
+            symbol="SPY", daily_pnl=0.0, equity=1.0, drawdown_pct=0.0,
+            assumed_spread_bps=0.0, cooldown_remaining=0, global_halt=False,
+            agreement_count=0, candle_context="NEUTRAL")
+    except Exception as exc:  # pragma: no cover - an unrunnable gate must not read as permissive
+        return {"permitted": False, "mode": mode,
+                "reason": f"frozen risk gate could not run: {type(exc).__name__}"}
+    checks = {str(item.get("name")): item for item in report.get("checks", [])
+              if isinstance(item, dict)}
+    check = checks.get("paper_mode")
+    if check is None:
+        return {"permitted": False, "mode": mode,
+                "reason": "the frozen risk gate no longer reports a paper_mode check"}
+    if not check.get("passed"):
+        return {"permitted": False, "mode": mode,
+                "reason": str(check.get("detail") or "the frozen paper_mode check failed")}
+    return {"permitted": True, "mode": mode, "reason": None}
+
+
+def frozen_risk_permitted_modes(
+        candidates: Sequence[str] = MODE_CANDIDATES) -> Tuple[str, ...]:
+    """Derive the mode set the frozen Risk engine actually permits. No hardcoding."""
+    return tuple(mode for mode in candidates if frozen_risk_permits(mode)["permitted"])
+
+
+def frozen_modes(candidates: Sequence[str] = MODE_CANDIDATES) -> Dict[str, Tuple[str, ...]]:
+    """Each frozen mode restriction reported separately, because they are separate blockers."""
+    return {"config_guard": frozen_config_guard_permitted_modes(candidates),
+            "risk": frozen_risk_permitted_modes(candidates)}
+
+
+def frozen_permitted_modes(candidates: Sequence[str] = MODE_CANDIDATES) -> Tuple[str, ...]:
+    """Modes the frozen core actually permits: config_guard AND risk must both agree.
+
+    A mode permitted by one and refused by the other is still refused.
+    """
+    restrictions = frozen_modes(candidates)
+    guard, risk = set(restrictions["config_guard"]), set(restrictions["risk"])
+    return tuple(mode for mode in candidates if mode in guard and mode in risk)
 
 
 class FrozenLiveBoundary:
@@ -241,9 +323,12 @@ class FrozenLiveBoundary:
     """
 
     def evaluate(self, *, mode: str, rule_ids: Sequence[str] | None = None,
-                 permitted_modes: Sequence[str] | None = None) -> LiveBoundaryVerdict:
+                 permitted_modes: Sequence[str] | None = None,
+                 risk_permitted_modes: Sequence[str] | None = None) -> LiveBoundaryVerdict:
         ids = tuple(rule_ids) if rule_ids is not None else frozen_constitution_rule_ids()
         modes = tuple(permitted_modes) if permitted_modes is not None else frozen_permitted_modes()
+        risk_modes = (tuple(risk_permitted_modes) if risk_permitted_modes is not None
+                      else frozen_risk_permitted_modes())
         digest = verify_frozen_core_digest()
         reasons: List[str] = []
 
@@ -259,6 +344,12 @@ class FrozenLiveBoundary:
             reasons.append(
                 f"frozen config mode is {mode!r}; the frozen config_guard permits {list(modes)}"
                 + (f" ({probe.get('reason')})" if probe.get("reason") else ""))
+        if mode not in risk_modes:
+            probe = frozen_risk_permits(mode) if risk_permitted_modes is None else {}
+            reasons.append(
+                f"the frozen Risk engine's forge_gate paper_mode check refuses mode {mode!r}; "
+                f"it permits {list(risk_modes)}"
+                + (f" ({probe.get('reason')})" if probe.get("reason") else ""))
         if not digest.get("verified"):
             reasons.append("frozen core digest could not be verified against infra/core_v06.sha256")
 
@@ -267,7 +358,7 @@ class FrozenLiveBoundary:
         return LiveBoundaryVerdict(
             released=released, code=code, reasons=tuple(reasons),
             frozen_core_verified=bool(digest.get("verified")), constitution_rule_ids=ids,
-            mode=mode, permitted_modes=modes,
+            mode=mode, permitted_modes=modes, risk_permitted_modes=risk_modes,
             prohibition_rules_present=tuple(prohibition),
             authorization_rules_present=tuple(authorization))
 

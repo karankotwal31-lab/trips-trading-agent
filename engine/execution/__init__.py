@@ -80,6 +80,12 @@ from .contracts import (  # noqa: E402
     decision_bar_close_time,
     decision_bar_is_closed,
 )
+from .adapters import (  # noqa: E402
+    AlpacaAdapter,
+    BrokerChannel,
+    BrokerContractError,
+    UpstoxAdapter,
+)
 from .amendment import (  # noqa: E402
     AMENDABLE_ADD_RULES,
     AMENDABLE_REMOVE_RULES,
@@ -122,9 +128,13 @@ from .gate import (  # noqa: E402
     Permission,
     capital_release,
     frozen_config_guard_permits,
+    frozen_config_guard_permitted_modes,
     frozen_config_mode,
     frozen_constitution_rule_ids,
+    frozen_modes,
     frozen_permitted_modes,
+    frozen_risk_permits,
+    frozen_risk_permitted_modes,
     trade_valid,
     verify_frozen_core_digest,
 )
@@ -149,16 +159,28 @@ from .lifecycle import (  # noqa: E402
     CORE_STATE_SOURCES,
     DEFAULT_STAGE,
     LIVE_LOCKED_REFUSAL,
+    OWNER_BLOCKING_ITEMS,
     Actor,
     Lifecycle,
     LiveAuthorization,
     Stage,
 )
+from .exchange_calendar import (  # noqa: E402
+    calendar_for_years,
+    default_us_equity_calendar,
+    early_closes,
+    market_holidays,
+)
 from .owner_authority import (  # noqa: E402
-    KEY_ENV as OWNER_AUTHORITY_KEY_ENV,
+    ALGORITHM as OWNER_SIGNATURE_ALGORITHM,
+    PURPOSE_AMENDMENT,
+    PURPOSE_LIVE_AUTHORIZATION,
+    SIGNATURE_VERSION as OWNER_SIGNATURE_VERSION,
     OwnerAuthorityError,
+    key_id_for,
+    load_public_key,
     owner_authority_status,
-    sign_owner_payload,
+    signed_message,
     verify_owner_signature,
 )
 from .preflight import (  # noqa: E402
@@ -225,10 +247,11 @@ __all__ = [
     "AmendmentError", "AmendmentProposal", "CoreStateBasis", "amended_rule_ids",
     "apply_amendment", "blockers_to_live_release", "frozen_core_basis",
     "live_release_requirements", "release_basis_from_verdict", "verify_amendment",
-    "frozen_config_guard_permits", "frozen_permitted_modes",
+    "frozen_config_guard_permits", "frozen_permitted_modes", "frozen_config_guard_permitted_modes",
+    "frozen_modes", "frozen_risk_permits", "frozen_risk_permitted_modes",
     "JOURNAL_FILE", "CycleDecision", "CycleRouter", "IntentPolicy", "RouteResult",
     "decisions_from_frozen_runtime", "describe_frozen_runtime_decisions", "route_frozen_cycle",
-    "CORE_STATE_CALLER_ASSERTED_REFUSED", "CORE_STATE_SOURCES",
+    "CORE_STATE_CALLER_ASSERTED_REFUSED", "CORE_STATE_SOURCES", "OWNER_BLOCKING_ITEMS",
     "CapitalGovernor", "DEFAULT_STAGE", "Discrepancy", "EVIDENCE_ALLOWLIST", "ENGINE_DIR",
     "ExecutionIntent", "ExecutionLayerError", "ExecutionState", "FORBIDDEN_OUTPUT_FIELDS",
     "FROZEN_CEILING_MAP", "FROZEN_PROHIBITION_RULE_IDS", "FrozenLiveBoundary", "GOVERNOR_KEYS",
@@ -236,6 +259,8 @@ __all__ = [
     "IllegalStateTransition", "IntentError", "IntentExpired", "LEDGER_FILE",
     "ANOMALY_CHECKS", "AUTHORIZED_TRANSPORTS", "AdapterRegistry", "BrokerRegistration",
     "DataPurpose", "DataSourceGuard", "DataSourceRecord", "FORBIDDEN_AUTOMATION_TECHNIQUES",
+    "AlpacaAdapter", "BrokerChannel", "BrokerContractError", "UpstoxAdapter",
+    "calendar_for_years", "default_us_equity_calendar", "early_closes", "market_holidays",
     "HealthGateEvidence", "LiveEnvironmentAttestation", "NON_EXECUTING_CLASSIFICATIONS",
     "PRECONDITIONS", "PluginClassification", "PreflightEvaluator", "PreflightReport",
     "ProvenanceViolation", "SessionCalendar", "SessionCalendarError", "SessionStatus",
@@ -253,6 +278,7 @@ __all__ = [
     "fingerprint_profile", "frozen_config_mode", "frozen_constitution_rule_ids",
     "frozen_hard_limits", "interpret_supervisor_output", "trade_valid",
     "verify_frozen_core_digest",
-    "OWNER_AUTHORITY_KEY_ENV", "OwnerAuthorityError", "owner_authority_status",
-    "sign_owner_payload", "verify_owner_signature",
+    "OWNER_SIGNATURE_ALGORITHM", "OWNER_SIGNATURE_VERSION", "PURPOSE_AMENDMENT",
+    "PURPOSE_LIVE_AUTHORIZATION", "OwnerAuthorityError", "key_id_for", "load_public_key",
+    "owner_authority_status", "signed_message", "verify_owner_signature", "ed25519",
 ]

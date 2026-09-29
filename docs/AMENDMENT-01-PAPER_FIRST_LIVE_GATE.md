@@ -15,7 +15,8 @@ not on the text of §3.
 | Affects frozen core | **Yes — 4 frozen files + 3 locked fingerprints** |
 | Authority to enact | Owner only. No autonomous component may apply, schedule, or prepare-execute this amendment. |
 | Baseline at time of drafting | 125/125 tests PASS; frozen core 16/16 OK; `live_execution_present: false` |
-| Baseline at review | **240/240 tests PASS** across 7 suites; frozen core 16/16 OK; infra manifest `1c673d0e…d059` |
+| Baseline at review | **273/273 tests PASS** across 7 suites; frozen core 16/16 OK; infra manifest `1c673d0e…d059` |
+| Ceiling reached | **`LIVE_READY_LOCKED`** — every remaining blocker is an owner credential, capital value or signature (§21.4) |
 | Review verdict | **`AMEND` — not approvable as written** (see §20) |
 | Decision required from owner | Approve / Reject / Amend (see §18) |
 
@@ -37,7 +38,12 @@ It is enforced at three independent frozen code sites. All three must change; ch
 
 Locked downstream artifacts: `engine/config.json` `"mode": "paper"` (fingerprint `270fbb5f…aa15`, also hashed inside `engine/approved_build.json`), and `engine/capability_registry.json` (`"execution": "paper-only"`, `not_supported[0] == "live-money order submission"`).
 
-**Why this cannot be dodged.** The prohibition is not a configuration value that can be flipped; it is a policy assertion enforced in three frozen layers, one of which (`constitution_gate`) is the terminal gate for every trade decision. Any implementation that attempts live execution without amending all three will be blocked at `constitution_gate` and must not be worked around.
+**Why this cannot be dodged.** The prohibition is not a configuration value that can be flipped; it is a policy assertion enforced in three frozen layers, one of which (`constitution_gate`) is the terminal gate for every trade decision. Any implementation that attempts live execution without amending all three will be blocked and must not be worked around.
+
+**There are three blockers, not one** — see §21.2. The Constitution rule, the `config_guard` mode
+restriction, and the frozen Risk engine's own `forge_gate` `paper_mode` check each refuse live mode
+for their own reason. `engine/execution/gate.py` probes all three by running the real frozen code,
+and `blockers_to_live_release()` reports them by category rather than collapsing them.
 
 ---
 
@@ -159,13 +165,18 @@ approved strategy/build identity · approved config identity · approved risk pr
 
 Any material change to strategy code, Risk rules, Capital Governor rules, Truth rules, symbol scope or execution semantics **invalidates the artifact**, returning the runtime to `LIVE_LOCKED` until verification completes again. This is the mechanism that makes §8 of the source specification ("immutable approved identity") enforceable rather than aspirational.
 
-**Required enforcement — added at review, see §20.1.** "Owner-signed" must be a cryptographic
-fact, not a boolean. Implemented in `engine/execution/owner_authority.py`: an HMAC-SHA256 tag over
-the artifact's canonical payload, verified against a key that exists only outside this repository
-(`TRIPS_OWNER_AUTHORITY_KEY`, or `TRIPS_OWNER_AUTHORITY_KEY_FILE`). With no usable key, every owner
-act fails closed as `OWNER_AUTHORITY_KEY_NOT_CONFIGURED`. Independently, a release basis is refused
-unless it is accompanied by a **valid signed** authorization, so owner decision A cannot imply
-owner decision B.
+**Required enforcement — added at review, see §20.1 and §21.1.** "Owner-signed" must be a
+cryptographic fact, not a boolean. Implemented in `engine/execution/owner_authority.py`: an
+**Ed25519** signature (RFC 8032) over a domain-separated frame of the artifact's canonical payload,
+verified against the owner's **public** key in `engine/owner_public_key.json`. The private key never
+enters this repository, this process, or any environment variable; the public key is public
+material protected against substitution by build integrity. With no key installed, every owner act
+fails closed as `OWNER_AUTHORITY_KEY_NOT_CONFIGURED`. Independently, a release basis is refused
+unless accompanied by a **valid signed** authorization, so owner decision A cannot imply decision B.
+
+Replay protection is layered: a purpose tag (an amendment signature can never be replayed as a live
+authorization), a signature version, a key id that must equal the pinned key, content binding, and
+the artifact's own validity window.
 
 ---
 
@@ -399,11 +410,10 @@ Two further paths compounded it:
 
 ### 20.2 Repair (implemented and regression-tested)
 
-- **`engine/execution/owner_authority.py`** (new) — the trust root. HMAC-SHA256 over the canonical
-  payload, key supplied by the owner via `TRIPS_OWNER_AUTHORITY_KEY` (or `…_KEY_FILE`), never stored
-  in this repository, read at call time and never cached. Fail-closed codes:
-  `OWNER_AUTHORITY_KEY_NOT_CONFIGURED`, `OWNER_AUTHORITY_KEY_TOO_WEAK`, `OWNER_SIGNATURE_REQUIRED`,
-  `OWNER_SIGNATURE_INVALID`.
+- **`engine/execution/owner_authority.py`** (new) — the trust root. **Superseded by Ed25519 in §21.1.**
+  The original HMAC design required the owner to hand over a shared secret that the verifying
+  process could also sign with. It is replaced by an asymmetric root; the residual assumption below
+  no longer applies.
 - **`owner_signed` booleans deleted** from both `AmendmentProposal` and `LiveAuthorization`. Passing
   one is now a `TypeError`; authority is the `signature` field only.
 - **Signatures cover contents**, so a proposal cannot be altered after signing — changing
@@ -417,9 +427,8 @@ Two further paths compounded it:
 - **8 new tests**, including a regression that replays the attack above and asserts nothing reaches
   the broker, plus the honest path (signed proposal **and** signed authorization) still transmitting.
 
-Stated plainly, the residual trust assumption: a process that can read the owner key can sign.
-Keep the key out of the trading process's ordinary runtime environment, and treat its presence as
-itself privileged.
+Stated plainly: the HMAC design's residual assumption — *a process that can read the owner key can
+sign* — **no longer applies**, because there is no key in the process to read. See §21.1.
 
 ### 20.3 What still blocks approval
 
@@ -448,5 +457,94 @@ transmission path remains real code whose only blocker is the frozen invariant, 
 
 **Drafting note:** no file in the frozen core, no configuration value, no fingerprint and no
 manifest was modified in the production or the review of this document. `infra/core_v06.sha256`
-verifies 16/16 and the 240-test baseline is green. This amendment takes effect only via an explicit
+verifies 16/16 and the 273-test baseline is green. This amendment takes effect only via an explicit
 owner decision and the §12/§18 procedure.
+
+---
+
+## 21. Second review round — completing everything an autonomous process can complete
+
+Instruction honoured: the truncated §28+ was not waited for, and work continued until every
+remaining blocker was an owner credential, an owner capital value, or an owner signature.
+
+### 21.1 The trust root is now asymmetric (Ed25519), and no key is requested
+
+`engine/execution/ed25519.py` implements RFC 8032 over the standard library only — the repository
+has no third-party crypto dependency and CI installs nothing, so the trust root must not depend on
+a package that may be absent on the runner. Both published RFC 8032 vectors are asserted in
+`tests/test_live_readiness.py` (public key and signature both match byte-for-byte).
+
+The first implementation of this section used **HMAC**, which was wrong for this system and is
+replaced:
+
+| | HMAC (rejected) | Ed25519 (current) |
+|---|---|---|
+| Key location | a shared secret the owner hands over, held by the verifying process | public key only, in the repository; private key never enters it |
+| Who can forge | anyone who can read the secret, including the process that verifies | only the holder of the private key |
+| Key rotation | shared secret, no identity | a `key_id` binds each signature to a specific key |
+
+A symmetric key in a trading process is a standing invitation to forge an owner act, and it required
+asking the owner for a secret. Neither is acceptable, so **no key is requested and none is
+configured**; the pinned slot is empty and every owner act fails closed.
+
+**Build integrity.** `engine/owner_public_key.json` is now in `build_guard.CRITICAL_FILES`, so
+substituting the public key — the one thing that would let anyone forge an owner act — trips
+`EXECUTABLE_BUILD_LOCK`. The build fingerprint was re-issued accordingly
+(`28edab6a…67a9`, 37 pinned files).
+
+**Domain separation and replay protection.** Every signature covers
+`TRIPS-OWNER-AUTHORITY-V1 ␀ purpose ␀ version ␀ key_id ␀ payload`, so:
+
+1. an amendment signature cannot be replayed as a live authorization, or vice versa;
+2. a future scheme cannot be confused with this one;
+3. a signature from a rotated-away key is refused (`OWNER_AUTHORITY_KEY_MISMATCH`), not accepted;
+4. any mutation after signing invalidates it (content binding);
+5. both artifacts carry their own validity window (freshness).
+
+`scripts/sign_owner_artifact.py` is owner-side only: it generates a keypair, refuses to write key
+material inside the repository, never prints the private key, and self-verifies every signature it
+produces. **The owner signature remains blank.**
+
+### 21.2 There are three frozen blockers, and the third was missed
+
+The first round reported two. Re-reading the frozen Risk engine found a third: `forge_gate` opens
+with `GateCheck("paper_mode", config.get("mode") == "paper", ...)`, so the frozen Risk engine
+refuses live mode **in its own right**. Amending the Constitution and `config_guard` alone would
+have produced a system reporting every precondition satisfied while its own risk gate still vetoed
+live mode.
+
+`frozen_risk_permits()` now probes the real frozen gate — the same technique as the `config_guard`
+probe, so it cannot drift — and a missing `paper_mode` check is treated as a refusal.
+`blockers_to_live_release()` reports all three by category, and `engine/risk.py` is named in the
+§12 change set.
+
+### 21.3 The engine work that is not blocked on an owner
+
+| Item | What was done |
+|---|---|
+| Exchange calendar | `engine/execution/exchange_calendar.py` computes the US cash-equity holiday, early-close and validity schedule deterministically. `SESSION_TRUTH_UNKNOWN` is no longer waiting on an operator's clipboard, and the calendar states its own provenance limits (not a live feed; halts are not represented). |
+| Broker adapters | `engine/execution/adapters.py` — Upstox and Alpaca adapters that validate and translate, with **no shipped channel**, so the library carries no network capability. |
+| Ported from PR #1 | validate-before-network; integer-quantity discipline; refuse rather than truncate an over-long order tag; refuse a split acknowledgement instead of guessing which order it was; validate snapshot shape and never drop an identity-less order row. |
+| Deliberately not ported | `require_live_opt_in()` and its `TRIPS_LIVE_EXECUTION=ENABLED` flag — an operator-settable boolean carrying financial authority, the exact pattern §20.1 found forgeable. And `LiveLimits`' invented numbers, because capital values are an owner input. |
+| PR #1 | **Closed unmerged.** It touched no file on `main`. Its four genuinely good behaviours were ported; its second parallel authority model was not merged. |
+| Ceiling | `LIVE_READY_LOCKED` added. Reachable by any actor once the engineering checks pass, and it grants nothing: `may_transmit_live()` still refuses, and `LIVE_ENABLED` is still owner-only and only reachable *through* it. |
+
+### 21.4 What is left, and every item is the owner's
+
+`Lifecycle.live_readiness()` classifies the remainder. All eight engineering checks pass; what
+remains is exactly:
+
+| # | Blocker | Why an autonomous process cannot clear it |
+|---|---|---|
+| 1 | `owner_public_key_configured` | requires the owner's key |
+| 2 | `capital_governor_profile_set` | capital values are an owner input; **none was invented** |
+| 3 | `broker_channel_and_conformance` | an authorized programmable interface plus owner credentials |
+| 4 | `production_market_data` | real data credentials and entitlement evidence; provider mode is still `DEMO` |
+| 5 | `owner_signed_live_authorization` | owner decision B, signed with the owner's private key |
+| 6 | `constitutional_amendment_applied` | re-freezing the frozen core is an owner act through the approved change process |
+
+Two items are no longer engineering blockers: the exchange calendar and the test/CI gate are done.
+One item is deliberately *not* a blocker and remains unfinished on purpose: profitability evidence
+cannot be produced without real market data, so it folds into item 4.
+
+**Ceiling reached: `LIVE_READY_LOCKED`. Nothing above it was attempted.**

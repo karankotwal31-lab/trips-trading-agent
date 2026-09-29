@@ -20,7 +20,7 @@ local to the suite, never shipped by the library.
 
 from __future__ import annotations
 
-import os
+import atexit
 import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -31,14 +31,17 @@ sys.path.insert(0, str(TESTS_DIR))
 
 import test_execution_layer as base  # noqa: E402
 
-# This suite exercises the honest owner path, so its own process installs a synthetic owner key.
-# (run_all_tests.py runs every suite in an isolated subprocess.) Fail-closed behaviour is asserted
-# explicitly by the tests that remove the key again.
-os.environ[base.OWNER_AUTHORITY_KEY_ENV] = base.TEST_OWNER_KEY
+# This suite exercises the honest owner path end to end, so the synthetic test public key stays
+# installed for the whole module. (run_all_tests.py runs every suite in an isolated subprocess.)
+# Tests that assert fail-closed behaviour install their own key file for the duration.
+_OWNER_KEY_INSTALLED = base.owner_key_configured()
+_OWNER_KEY_INSTALLED.__enter__()
+atexit.register(_OWNER_KEY_INSTALLED.__exit__, None, None, None)
 
 from execution import (  # noqa: E402
     AMENDMENT_APPLICABLE,
     JOURNAL_FILE,
+    PURPOSE_AMENDMENT,
     AdapterRegistry,
     AmendmentApplicationRefused,
     AmendmentError,
@@ -68,11 +71,12 @@ from execution import (  # noqa: E402
     frozen_constitution_rule_ids,
     frozen_core_basis,
     frozen_permitted_modes,
+    frozen_risk_permits,
+    frozen_risk_permitted_modes,
     interpret_supervisor_output,
     live_release_requirements,
     release_basis_from_verdict,
     route_frozen_cycle,
-    sign_owner_payload,
     verify_amendment,
 )
 from providers import DemoProvider  # noqa: E402
@@ -107,7 +111,8 @@ def amendment_proposal(**overrides):
     unsigned = AmendmentProposal(**payload)
     if "signature" in overrides:
         return unsigned
-    return replace(unsigned, signature=sign_owner_payload(unsigned.signed_payload()))
+    return replace(unsigned, signature=base.sign_for_tests(PURPOSE_AMENDMENT,
+                                                           unsigned.signed_payload()))
 
 
 def owner_authorization():
@@ -176,18 +181,37 @@ def route_kwargs(now, **overrides):
 
 
 def test_every_frozen_blocker_is_named_not_just_paper_first():
-    """PAPER_FIRST was never the only frozen blocker. Both are reported by category."""
+    """PAPER_FIRST was never the only frozen blocker. THREE separate sites are reported."""
     requirements = live_release_requirements()
     blockers = requirements["blockers_to_live_release"]
     assert "CONSTITUTION_PROHIBITION_RULE" in blockers
     assert "CONFIG_GUARD_MODE_RESTRICTION" in blockers
+    assert "RISK_MODE_RESTRICTION" in blockers
     assert frozen_config_guard_permits("paper")["permitted"] is True
     live_probe = frozen_config_guard_permits("live")
     assert live_probe["permitted"] is False
     assert "paper mode only" in str(live_probe["reason"])
+    # The third blocker is the frozen Risk engine's own paper_mode check, probed not mirrored.
+    assert frozen_risk_permits("paper")["permitted"] is True
+    risk_probe = frozen_risk_permits("live")
+    assert risk_probe["permitted"] is False
+    assert "Live execution is disabled by design" in str(risk_probe["reason"])
     assert frozen_permitted_modes() == ("paper",)
+    assert frozen_risk_permitted_modes() == ("paper",)
+    assert requirements["frozen_mode_restrictions"] == {"config_guard": ["paper"],
+                                                        "risk": ["paper"]}
     assert requirements["frozen_config_guard_permitted_modes"] == ["paper"]
     assert "engine/config_guard.py" in requirements["artifacts_requiring_owner_review_and_reapproval"]
+    assert "engine/risk.py" in requirements["artifacts_requiring_owner_review_and_reapproval"]
+
+
+def test_the_risk_engine_blocker_is_independent_of_the_config_guard():
+    """Two frozen sites refuse live for two different reasons; lifting one is not enough."""
+    guard, risk = frozen_config_guard_permits("live"), frozen_risk_permits("live")
+    assert guard["permitted"] is False and risk["permitted"] is False
+    assert "paper mode only" in str(guard["reason"])
+    assert "Live execution is disabled by design" in str(risk["reason"])
+    assert guard["reason"] != risk["reason"]
 
 
 def test_caller_asserted_core_state_can_never_release_capital():
@@ -217,7 +241,8 @@ def test_verified_owner_amendment_opens_the_production_boundary():
     assert verdict["boundary_code"] == "LIVE_RELEASE_PERMITTED"
     assert verdict["blockers_after_amendment"] == []
     assert sorted(verdict["blockers_resolved"]) == ["CONFIG_GUARD_MODE_RESTRICTION",
-                                                    "CONSTITUTION_PROHIBITION_RULE"]
+                                                    "CONSTITUTION_PROHIBITION_RULE",
+                                                    "RISK_MODE_RESTRICTION"]
     assert verdict["permitted_modes"] == ["paper", "live"]
     assert verdict["amended_rule_count"] == 35 and verdict["preserved_rule_count"] == 34
     assert verdict["boundary"]["released"] is True
@@ -257,7 +282,7 @@ def test_amendment_strict_superset_preserves_every_other_rule():
 
 
 def test_amendment_must_also_resolve_the_config_guard_mode_restriction():
-    """An amendment that only renames the rule leaves the second blocker in place."""
+    """An amendment that only renames the rule leaves the second and third blockers in place."""
     verdict = verify_amendment(amendment_proposal(adds_rules=(), removes_rules=()))
     assert verdict["code"] == "AMENDMENT_DOES_NOT_OPEN_THE_GATE"
     already = verify_amendment(amendment_proposal(target_mode="paper"))
@@ -296,7 +321,8 @@ def test_release_basis_is_refused_from_a_non_applicable_amendment():
     except AmendmentApplicationRefused:
         pass
     assert blockers_to_live_release()["blockers"] == ["CONSTITUTION_PROHIBITION_RULE",
-                                                      "CONFIG_GUARD_MODE_RESTRICTION"]
+                                                      "CONFIG_GUARD_MODE_RESTRICTION",
+                                                      "RISK_MODE_RESTRICTION"]
 
 
 # ---------------------------------------------------------------------------
@@ -580,9 +606,41 @@ def test_amendment_fails_closed_when_no_owner_key_is_configured():
 
 
 def test_amendment_with_a_wrong_signature_is_refused():
-    verdict = verify_amendment(amendment_proposal(signature="ab" * 32))
+    # Well-formed envelope, right key id, but signed over different bytes.
+    forged = base.sign_for_tests(PURPOSE_AMENDMENT, b"a different payload entirely")
+    verdict = verify_amendment(amendment_proposal(signature=forged))
     assert verdict["code"] == "OWNER_SIGNATURE_INVALID"
     assert verdict["applicable"] is False
+
+
+def test_a_signature_from_another_key_is_refused_as_a_mismatch():
+    other_private, other_public = base.ed25519.generate_keypair(b"\x42" * 32)
+    other_id = base.key_id_for(other_public)
+    forged = base.sign_for_tests(PURPOSE_AMENDMENT, b"payload", private=other_private,
+                                 key_id=other_id)
+    verdict = verify_amendment(amendment_proposal(signature=forged))
+    assert verdict["code"] == "OWNER_AUTHORITY_KEY_MISMATCH"
+    assert verdict["applicable"] is False
+
+
+def test_an_envelope_from_a_rotated_key_cannot_be_replayed():
+    """Key binding: a signature minted under a different key is refused, not accepted."""
+    other_private, other_public = base.ed25519.generate_keypair(b"\x42" * 32)
+    other_id = base.key_id_for(other_public)
+    with base.owner_key_configured(other_public):
+        # Signed while the OTHER key is the pinned one...
+        signed = AmendmentProposal(**{
+            "amendment_id": "AMENDMENT-01-LIVE-GATE", "adds_rules": ("LIVE_GATE",),
+            "removes_rules": ("PAPER_FIRST",), "target_mode": "live",
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "rationale": "r",
+            "signature": base.sign_for_tests(PURPOSE_AMENDMENT, b"p", private=other_private,
+                                             key_id=other_id),
+        })
+    with base.owner_key_configured():
+        verdict = verify_amendment(signed)
+    assert verdict["code"] == "OWNER_AUTHORITY_KEY_MISMATCH"
 
 
 def test_a_modified_proposal_does_not_verify_against_the_owner_signature():

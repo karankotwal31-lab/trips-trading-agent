@@ -41,8 +41,10 @@ from execution import (  # noqa: E402
     CORE_CAPABILITIES,
     EVIDENCE_ALLOWLIST,
     JOURNAL_FILE,
-    OWNER_AUTHORITY_KEY_ENV,
+    OWNER_SIGNATURE_ALGORITHM,
     PRECONDITIONS,
+    PURPOSE_AMENDMENT,
+    PURPOSE_LIVE_AUTHORIZATION,
     TRADE_VALID_FIELDS,
     AdapterRegistry,
     AmendmentApplicationRefused,
@@ -66,7 +68,7 @@ from execution import (  # noqa: E402
     live_release_requirements,
     release_basis_from_verdict,
     route_frozen_cycle,
-    sign_owner_payload,
+    signed_message,
     verify_amendment,
     Actor,
     AuthorityGate,
@@ -124,6 +126,8 @@ from execution import (  # noqa: E402
     trade_valid,
     verify_frozen_core_digest,
 )
+from execution import ed25519, owner_authority  # noqa: E402
+from execution.owner_authority import key_id_for  # noqa: E402
 
 # Explicit TEST values. The library ships NO financial limits; the owner supplies them.
 TEST_PROFILE = {
@@ -282,11 +286,12 @@ class ReleasingBoundary(FrozenLiveBoundary):
     code path exists.
     """
 
-    def evaluate(self, *, mode, rule_ids=None, permitted_modes=None):
+    def evaluate(self, *, mode, rule_ids=None, permitted_modes=None, risk_permitted_modes=None):
         return LiveBoundaryVerdict(released=True, code="LIVE_RELEASE_PERMITTED", reasons=(),
                                    frozen_core_verified=True, constitution_rule_ids=(),
                                    mode=mode,
-                                   permitted_modes=tuple(permitted_modes or (mode,)))
+                                   permitted_modes=tuple(permitted_modes or (mode,)),
+                                   risk_permitted_modes=tuple(risk_permitted_modes or (mode,)))
 
 
 def approved_config():
@@ -332,37 +337,55 @@ def portfolio(**overrides):
     return PortfolioSnapshot(**base)
 
 
-#: A synthetic owner authority key (>=32 bytes). TEST FIXTURE ONLY - the real key never lives
-#: in the repository, and an unconfigured key means no owner act can be performed at all.
-TEST_OWNER_KEY = "test-only-owner-authority-key-0123456789abcdef"
+#: A synthetic Ed25519 owner keypair, derived from a fixed TEST seed. The real owner's private key
+#: never lives in this repository; a test key is the only key that can ever appear here. Tests swap
+#: in a temporary public-key file, because the production path is pinned by build integrity.
+TEST_OWNER_SEED = bytes.fromhex(
+    "5c1f9a3e7d2b4c6a8e0f2a4c6e8a0c2e4f6a8c0e2a4c6e8a0c2e4f6a8c0e2a4c")
+TEST_OWNER_PRIVATE, TEST_OWNER_PUBLIC = ed25519.generate_keypair(TEST_OWNER_SEED)
+TEST_OWNER_KEY_ID = key_id_for(TEST_OWNER_PUBLIC)
+
+
+def _owner_key_document(public_key: bytes, *, configured: bool = True) -> dict:
+    return {"algorithm": OWNER_SIGNATURE_ALGORITHM, "configured": configured,
+            "key_id": key_id_for(public_key) if configured else "",
+            "public_key": public_key.hex() if configured else ""}
 
 
 @contextmanager
-def owner_key_configured(key: str = TEST_OWNER_KEY):
-    """Install a synthetic owner authority key for the duration of the block."""
-    previous = os.environ.get(OWNER_AUTHORITY_KEY_ENV)
-    os.environ[OWNER_AUTHORITY_KEY_ENV] = key
-    try:
+def _installed_owner_key(document: dict):
+    previous = owner_authority.PUBLIC_KEY_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "owner_public_key.json"
+        path.write_text(json.dumps(document, sort_keys=True) + "\n")
+        owner_authority.PUBLIC_KEY_PATH = path
+        owner_authority._VERIFY_CACHE.clear()
+        try:
+            yield
+        finally:
+            owner_authority.PUBLIC_KEY_PATH = previous
+            owner_authority._VERIFY_CACHE.clear()
+
+
+@contextmanager
+def owner_key_configured(public_key: bytes = TEST_OWNER_PUBLIC):
+    """Install a synthetic Ed25519 public key for the duration of the block."""
+    with _installed_owner_key(_owner_key_document(public_key)):
         yield
-    finally:
-        if previous is None:
-            os.environ.pop(OWNER_AUTHORITY_KEY_ENV, None)
-        else:
-            os.environ[OWNER_AUTHORITY_KEY_ENV] = previous
 
 
 @contextmanager
 def owner_key_unconfigured():
-    """Remove every owner key source, so fail-closed behaviour can be asserted."""
-    previous = os.environ.pop(OWNER_AUTHORITY_KEY_ENV, None)
-    previous_file = os.environ.pop("TRIPS_OWNER_AUTHORITY_KEY_FILE", None)
-    try:
+    """No owner key installed at all, so fail-closed behaviour can be asserted."""
+    with _installed_owner_key(_owner_key_document(TEST_OWNER_PUBLIC, configured=False)):
         yield
-    finally:
-        if previous is not None:
-            os.environ[OWNER_AUTHORITY_KEY_ENV] = previous
-        if previous_file is not None:
-            os.environ["TRIPS_OWNER_AUTHORITY_KEY_FILE"] = previous_file
+
+
+def sign_for_tests(purpose: str, payload: bytes, *, private: bytes = TEST_OWNER_PRIVATE,
+                   key_id: str = TEST_OWNER_KEY_ID) -> str:
+    """Produce a real Ed25519 signature envelope. Owner-side operation; test fixture only."""
+    signature = ed25519.sign(signed_message(purpose, payload, key_id), private)
+    return f"{OWNER_SIGNATURE_ALGORITHM}:v1:{key_id}:{signature.hex()}"
 
 
 def signed_authorization(**overrides) -> LiveAuthorization:
@@ -377,7 +400,8 @@ def signed_authorization(**overrides) -> LiveAuthorization:
     }
     payload.update(overrides)
     unsigned = LiveAuthorization(**payload)
-    return replace(unsigned, signature=sign_owner_payload(unsigned.signed_payload()))
+    return replace(unsigned, signature=sign_for_tests(PURPOSE_LIVE_AUTHORIZATION,
+                                                      unsigned.signed_payload()))
 
 
 def in_session_now() -> datetime:
@@ -1163,17 +1187,52 @@ def test_supervisor_runner_rejects_order_shaped_provider_output():
         assert "side" in str(exc) and "quantity" in str(exc)
 
 
-def test_shipped_package_ships_no_concrete_broker_adapter():
-    """No fake adapter may be marked complete. Only the ABC exists in the package."""
+def test_no_shipped_broker_adapter_can_reach_a_broker():
+    """Adapters ship for translation and validation, but none of them can transmit.
+
+    A concrete adapter is now allowed to exist — it can validate a canonical intent and build a
+    broker-shaped request. What is still forbidden is an adapter that can actually reach a broker,
+    or that presents itself as verified. Both are asserted here rather than assumed.
+    """
     import re
 
+    from execution.adapters import AlpacaAdapter, BrokerChannel, UpstoxAdapter
+
     package = ROOT / "engine" / "execution"
-    found = []
+    shipped = []
     for path in sorted(package.glob("*.py")):
         for match in re.findall(r"^class\s+(\w+)\((?:[^)]*\bBrokerAdapter\b[^)]*)\)",
                                 path.read_text(), flags=re.MULTILINE):
-            found.append(f"{path.name}:{match}")
-    assert found == [], f"concrete broker adapters must not ship in the package: {found}"
+            shipped.append(f"{path.name}:{match}")
+    assert shipped, "the package should now carry concrete adapters"
+
+    for adapter in (UpstoxAdapter(), AlpacaAdapter()):
+        matrix = adapter.capability_matrix()
+        assert len(matrix.missing_core()) == len(matrix.statuses), (
+            f"{adapter.broker_id} must present no verified capability")
+        assert adapter.health().connected is False
+        for call in (lambda: adapter.submit_order(client_order_id="x", representation={}),
+                     lambda: adapter.account(),
+                     lambda: adapter.cancel_order(broker_order_id="1", reason="r")):
+            try:
+                call()
+                raise AssertionError("a shipped adapter must not be able to reach a broker")
+            except Exception as exc:
+                assert "no broker channel is configured" in str(exc), str(exc)
+
+    # No channel implementation ships, so the package carries no network capability.
+    for path in sorted(package.glob("*.py")):
+        for match in re.findall(r"^class\s+(\w+)\((?:[^)]*\bBrokerChannel\b[^)]*)\)",
+                                path.read_text(), flags=re.MULTILINE):
+            assert match == "BrokerChannel", f"a BrokerChannel implementation shipped: {match}"
+    assert BrokerChannel.__abstractmethods__
+
+
+def test_live_enabled_is_not_directly_reachable_from_live_locked():
+    """The readiness stage is the ceiling: LIVE_ENABLED must be entered through it."""
+    outcome = Lifecycle(Stage.LIVE_LOCKED).advance(Stage.LIVE_ENABLED, actor=Actor.OWNER)
+    assert outcome["advanced"] is False
+    assert outcome["code"] == "PROMOTION_REFUSED_ILLEGAL_TRANSITION"
 
 
 def test_economic_meaning_checker_rejects_each_forbidden_conversion():
@@ -1222,21 +1281,22 @@ def valid_authorization():
 
 def test_live_enabled_is_unreachable_even_with_a_valid_owner_authorization():
     with owner_key_configured():
-        outcome = Lifecycle(Stage.LIVE_LOCKED).advance(Stage.LIVE_ENABLED, actor=Actor.OWNER,
-                                                       authorization=valid_authorization())
+        outcome = Lifecycle(Stage.LIVE_READY_LOCKED).advance(Stage.LIVE_ENABLED,
+                                                             actor=Actor.OWNER,
+                                                             authorization=valid_authorization())
     assert outcome["advanced"] is False
     assert outcome["code"] == "LIVE_LOCKED_REFUSAL"
 
 
 def test_live_enabled_requires_an_authorization_artifact_at_all():
-    outcome = Lifecycle(Stage.LIVE_LOCKED).advance(Stage.LIVE_ENABLED, actor=Actor.OWNER)
+    outcome = Lifecycle(Stage.LIVE_READY_LOCKED).advance(Stage.LIVE_ENABLED, actor=Actor.OWNER)
     assert outcome["advanced"] is False
     assert outcome["code"] == "LIVE_ENABLE_REFUSED_NO_AUTHORIZATION"
 
 
 def test_live_authorization_drift_is_refused_even_with_a_releasing_boundary():
     with isolated_store(), owner_key_configured():
-        outcome = Lifecycle(Stage.LIVE_LOCKED, ReleasingBoundary()).advance(
+        outcome = Lifecycle(Stage.LIVE_READY_LOCKED, ReleasingBoundary()).advance(
             Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=valid_authorization(),
             config=approved_config(), governor_profile_hash="a" * 64)
         assert outcome["advanced"] is False
