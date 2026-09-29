@@ -27,10 +27,16 @@ from execution.production_runtime import (  # noqa: E402
     BROKER_ENV,
     PRIMARY_PROVIDER_ENV,
     SECONDARY_PROVIDER_ENV,
+    build_production_data_providers,
     build_read_only_broker_verifier,
     external_dependency_status,
     external_readiness_report,
 )
+from execution.realtime_providers import (  # noqa: E402
+    AlphaVantageRealtimeProvider,
+    TwelveDataRealtimeProvider,
+)
+from execution.market_data import MarketDataError  # noqa: E402
 
 
 class FakeRealtimeProvider:
@@ -164,6 +170,163 @@ def test_live_broker_readiness_surface_is_structurally_non_mutating():
     exposed = {name for name in dir(target) if not name.startswith("_")}
     assert not any(name in exposed for name in (
         "submit", "submit_order", "cancel", "cancel_order", "replace", "modify", "place_order"))
+
+
+
+class _BytesResponse:
+    def __init__(self, payload):
+        self._raw = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self, limit):
+        return self._raw[:limit]
+
+
+def test_alpha_vantage_realtime_adapter_requests_explicit_entitlement_and_60min():
+    captured = {}
+    payload = {
+        "Meta Data": {
+            "2. Symbol": "SPY",
+            "4. Interval": "60min",
+            "6. Time Zone": "America/New_York",
+        },
+        "Time Series (60min)": {
+            "2026-09-28 10:00:00": {
+                "1. open": "500", "2. high": "501", "3. low": "499",
+                "4. close": "500.5", "5. volume": "1000",
+            },
+            "2026-09-28 11:00:00": {
+                "1. open": "500.5", "2. high": "502", "3. low": "500",
+                "4. close": "501", "5. volume": "1200",
+            },
+        },
+    }
+
+    def opener(request, timeout):
+        captured["url"] = request.full_url
+        return _BytesResponse(payload)
+
+    provider = AlphaVantageRealtimeProvider(api_key="AV-SECRET", opener=opener)
+    bars = provider.bars("SPY", 2)
+    from urllib.parse import parse_qs, urlparse
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["interval"] == ["60min"]
+    assert query["entitlement"] == ["realtime"]
+    assert query["extended_hours"] == ["false"]
+    assert query["symbol"] == ["SPY"]
+    assert provider.interval == "60min"
+    assert provider.source_kind == "real"
+    assert provider.identity.can_request_realtime_entitlement is True
+    assert len(bars) == 2
+    assert all(bar.ts.endswith("+00:00") for bar in bars)
+
+
+def test_twelve_data_realtime_adapter_translates_60min_to_documented_1h():
+    captured = {}
+    payload = {
+        "meta": {
+            "symbol": "QQQ",
+            "interval": "1h",
+            "exchange_timezone": "America/New_York",
+            "exchange": "NASDAQ",
+            "type": "ETF",
+        },
+        "values": [
+            {"datetime": "2026-09-28T14:00:00+00:00", "open": "450", "high": "451",
+             "low": "449", "close": "450.5", "volume": "1000"},
+            {"datetime": "2026-09-28T15:00:00+00:00", "open": "450.5", "high": "452",
+             "low": "450", "close": "451", "volume": "1200"},
+        ],
+        "status": "ok",
+    }
+
+    def opener(request, timeout):
+        captured["url"] = request.full_url
+        return _BytesResponse(payload)
+
+    provider = TwelveDataRealtimeProvider(api_key="TD-SECRET", opener=opener)
+    bars = provider.bars("QQQ", 2)
+    from urllib.parse import parse_qs, urlparse
+    query = parse_qs(urlparse(captured["url"]).query)
+    assert query["interval"] == ["1h"]
+    assert query["timezone"] == ["UTC"]
+    assert query["prepost"] == ["false"]
+    assert query["symbol"] == ["QQQ"]
+    assert provider.interval == "60min"
+    assert provider.source_kind == "real"
+    assert provider.identity.can_request_realtime_entitlement is True
+    assert len(bars) == 2
+
+
+def test_realtime_provider_errors_never_echo_credentials():
+    secret = "DO-NOT-LEAK-THIS"
+
+    def failing_opener(request, timeout):
+        raise RuntimeError(f"request failed for {request.full_url}")
+
+    for provider in (
+        AlphaVantageRealtimeProvider(api_key=secret, opener=failing_opener),
+        TwelveDataRealtimeProvider(api_key=secret, opener=failing_opener),
+    ):
+        try:
+            provider.bars("AAPL", 2)
+            raise AssertionError("failing transport must not look successful")
+        except MarketDataError as exc:
+            assert secret not in str(exc)
+
+
+def test_production_bootstrap_builds_two_reviewed_independent_realtime_providers():
+    import os
+
+    names = {
+        PRIMARY_PROVIDER_ENV: "alpha_vantage",
+        SECONDARY_PROVIDER_ENV: "twelve_data",
+        "ALPHA_VANTAGE_API_KEY": "synthetic-av",
+        "TWELVE_DATA_API_KEY": "synthetic-td",
+    }
+    before = {key: os.environ.get(key) for key in names}
+    try:
+        os.environ.update(names)
+        primary, secondary = build_production_data_providers()
+    finally:
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    assert isinstance(primary, AlphaVantageRealtimeProvider)
+    assert isinstance(secondary, TwelveDataRealtimeProvider)
+    assert primary.identity.source_family != secondary.identity.source_family
+    assert primary.source_kind == secondary.source_kind == "real"
+
+
+def test_production_bootstrap_refuses_unreviewed_realtime_provider():
+    import os
+
+    names = {
+        PRIMARY_PROVIDER_ENV: "alpha_vantage",
+        SECONDARY_PROVIDER_ENV: "mystery_feed",
+        "ALPHA_VANTAGE_API_KEY": "synthetic-av",
+    }
+    before = {key: os.environ.get(key) for key in names}
+    try:
+        os.environ.update(names)
+        try:
+            build_production_data_providers()
+            raise AssertionError("unreviewed provider must be refused")
+        except Exception as exc:
+            assert "reviewed realtime allowlist" in str(exc)
+    finally:
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 if __name__ == "__main__":
