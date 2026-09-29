@@ -308,14 +308,28 @@ class PreflightEvaluator:
         governor_ok = True
         governor_detail = f"profile {self.governor.profile_hash[:12]} v{self.governor.profile_version}"
         drift_reasons: Tuple[str, ...] = ()
+        signed_ok = True
+        signed_code = "OWNER_SIGNATURE_NOT_EVALUATED"
         if self.authorization is not None:
+            # An unsigned artifact is not an authorization, so it cannot satisfy this precondition.
+            # Fail closed if the object cannot even prove a signature.
+            validator = getattr(self.authorization, "signature_valid", None)
+            signed_ok, signed_code, signed_detail = (validator() if callable(validator)
+                                                     else (False, "OWNER_SIGNATURE_REQUIRED",
+                                                           "authorization artifact proves no signature"))
             current = current_identity(config=dict(cfg), governor_profile_hash=self.governor.profile_hash)
             drifted, drift_reasons = authorization_drift(self.authorization, current)
-            governor_ok = not drifted
-            governor_detail += " (live authorization drifted)" if drifted else " (live authorization matches)"
+            governor_ok = bool(signed_ok and not drifted)
+            if not signed_ok:
+                governor_detail += f" (live authorization rejected: {signed_code} - {signed_detail})"
+            elif drifted:
+                governor_detail += " (live authorization drifted)"
+            else:
+                governor_detail += " (live authorization matches)"
         add("approved_capital_governor_profile", governor_ok, governor_detail)
         artifacts["governor"] = self.governor.describe()
         artifacts["authorization_drift"] = list(drift_reasons)
+        artifacts["authorization_signature"] = {"ok": bool(signed_ok), "code": signed_code}
         artifacts["intent_binding"] = {
             "intent_content_hash": intent.content_hash(),
             "symbol": intent.symbol,

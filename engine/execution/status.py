@@ -49,6 +49,7 @@ from execution import (  # noqa: E402
     frozen_hard_limits,
     frozen_permitted_modes,
     live_release_requirements,
+    owner_authority_status,
     verify_frozen_core_digest,
 )
 
@@ -208,13 +209,17 @@ def build_status() -> dict:
             "adds_rules": list(AMENDABLE_ADD_RULES),
             "removes_rules": list(AMENDABLE_REMOVE_RULES),
             "owner_signature_required": True,
+            "owner_signature_scheme": owner_authority_status()["algorithm"],
+            "owner_authority": owner_authority_status(),
             "self_applies": False,
             "artifacts_requiring_owner_review_and_reapproval": list(AMENDMENT_ARTIFACTS),
             "note": ("A verified, owner-signed amendment opens the gate using the PRODUCTION "
                      "FrozenLiveBoundary, and a verified release basis is the only way to release "
-                     "capital without the frozen files changing. Applying the amendment is refused "
-                     "here because editing hash-pinned frozen files and re-freezing the core "
-                     "manifest is an owner act."),
+                     "capital without the frozen files changing. Authority is an HMAC tag made with "
+                     "the owner key, never a boolean: a release basis without a valid signed live "
+                     "authorization is refused, so owner decision A cannot imply decision B. "
+                     "Applying the amendment is refused here because editing hash-pinned frozen "
+                     "files and re-freezing the core manifest is an owner act."),
         },
         "safety_suite_integrity": _suite_integrity(),
         "note": (

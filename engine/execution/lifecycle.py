@@ -20,6 +20,7 @@ from .amendment import CoreStateBasis, frozen_core_basis  # noqa: E402
 from .contracts import ExecutionLayerError, canonical_json
 from .gate import (FrozenLiveBoundary, LiveBoundaryVerdict, frozen_config_mode,
                    frozen_constitution_rule_ids, frozen_permitted_modes)
+from .owner_authority import owner_authority_status, verify_owner_signature  # noqa: E402
 from typing import Mapping  # noqa: E402
 
 LIVE_LOCKED_REFUSAL = "LIVE_LOCKED_REFUSAL"
@@ -67,6 +68,10 @@ class LiveAuthorization:
     Any material change to strategy code, Risk rules, Capital Governor rules, Truth rules,
     symbol scope or execution semantics must invalidate this and return the runtime to
     LIVE_LOCKED until verification completes again.
+
+    Authority is the ``signature`` field — an HMAC-SHA256 tag over ``signed_payload()`` made with
+    the owner key — and deliberately NOT a boolean. A boolean is settable by any caller, which
+    would make this artifact self-mintable and the two owner acts collapse into one forgery.
     """
 
     strategy_build_id: str
@@ -78,7 +83,17 @@ class LiveAuthorization:
     environment: str
     issued_at: str
     expires_at: str
-    owner_signed: bool = False
+    signature: str = ""
+
+    def signed_payload(self) -> bytes:
+        """The canonical bytes the owner signs. The signature itself is excluded."""
+        body = asdict(self)
+        body.pop("signature", None)
+        return canonical_json(body)
+
+    def signature_valid(self) -> Tuple[bool, str, str]:
+        """Verify this artifact against the owner key. Returns (ok, code, detail)."""
+        return verify_owner_signature(self.signed_payload(), self.signature)
 
     def _aware(self, value: str, name: str) -> datetime:
         try:
@@ -96,13 +111,14 @@ class LiveAuthorization:
         ))
 
     def content_hash(self) -> str:
-        return hashlib.sha256(canonical_json({**asdict(self), "content_hash": None})).hexdigest()
+        return hashlib.sha256(self.signed_payload()).hexdigest()
 
     def is_valid(self, now: datetime | None = None) -> Tuple[bool, Tuple[str, ...]]:
         now = now or datetime.now(timezone.utc)
         reasons = []
-        if not self.owner_signed:
-            reasons.append("authorization is not owner-signed")
+        signed_ok, signed_code, signed_detail = self.signature_valid()
+        if not signed_ok:
+            reasons.append(f"{signed_code}: {signed_detail}")
         if not self.identity_complete():
             reasons.append("authorization identity is incomplete")
         try:
@@ -125,12 +141,38 @@ class Lifecycle:
     """
 
     def __init__(self, stage: Stage = DEFAULT_STAGE, boundary: Optional[FrozenLiveBoundary] = None,
-                 release_basis: Optional[CoreStateBasis] = None) -> None:
+                 release_basis: Optional[CoreStateBasis] = None,
+                 authorization: Optional[LiveAuthorization] = None) -> None:
         self._stage = Stage(stage)
         self._boundary = boundary or FrozenLiveBoundary()
         if release_basis is not None and release_basis.source not in CORE_STATE_SOURCES:
             raise ExecutionLayerError(f"unrecognized release basis source {release_basis.source!r}")
+        if release_basis is not None and release_basis.source == "VERIFIED_AMENDMENT":
+            # A release basis proves what the AMENDED core would say. That is evidence, not
+            # authority: without the owner's signed authorization, a basis alone would release
+            # capital and owner decision A would be skippable entirely.
+            if authorization is None:
+                raise ExecutionLayerError(
+                    "a release basis requires the owner's signed live authorization; "
+                    "a basis is evidence, not authority")
+            valid, reasons = authorization.is_valid()
+            if not valid:
+                raise ExecutionLayerError("live authorization is not valid: " + "; ".join(reasons))
         self._release_basis = release_basis
+        self._authorization = authorization
+
+    @property
+    def authorization(self) -> Optional[LiveAuthorization]:
+        return self._authorization
+
+    def authorization_status(self) -> dict:
+        """Whether owner-signed acts are even possible in this runtime. Never returns key material."""
+        status = owner_authority_status()
+        status["authorization_present"] = self._authorization is not None
+        if self._authorization is not None:
+            ok, code, detail = self._authorization.signature_valid()
+            status["authorization_signature"] = {"ok": ok, "code": code, "detail": detail}
+        return status
 
     @property
     def stage(self) -> Stage:

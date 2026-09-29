@@ -12,18 +12,22 @@ somebody makes in a hurry:
 
 1. ``live_release_requirements()`` states, from the frozen core itself, exactly which frozen facts
    currently forbid release and exactly which artifacts would have to be re-approved.
-2. ``AmendmentProposal`` is an owner-signed, versioned, expiring description of the intended rule
-   change and target mode.
+2. ``AmendmentProposal`` is an owner-**signed**, versioned, expiring description of the intended
+   rule change and target mode. The signature is an HMAC-SHA256 tag over the proposal's canonical
+   payload, produced with the owner key held outside this repository. There is no ``owner_signed``
+   boolean: a boolean is settable by any caller and would make this whole mechanism forgeable.
 3. ``verify_amendment()`` proves the gate OPENS by running the **production**
    ``FrozenLiveBoundary`` over the amended rule set and mode. It enforces a strict-superset
    invariant: the amendment may remove only the prohibition and add only the authorizing rule.
+   It refuses when the owner key is unconfigured, absent, or the signature does not match.
 4. ``apply_amendment()`` deliberately refuses. Editing a hash-pinned frozen file is an owner act
    performed through the approved change process, never something this deterministic code does on
    its own initiative.
 
 So the override mechanism exists, is demonstrated and is tested — and it cannot be triggered by
 the Strategy, Risk, Governor, Student, Evolution, Guardian or AI Supervisor, or by a caller
-passing a convenient argument.
+passing a convenient argument: a caller who sets every argument still cannot produce a signature
+that verifies against a key it does not hold.
 """
 
 from __future__ import annotations
@@ -44,6 +48,8 @@ from .gate import (
     frozen_permitted_modes,
     verify_frozen_core_digest,
 )
+from .owner_authority import OwnerAuthorityError, owner_authority_status, verify_owner_signature
+from . import owner_authority
 
 #: Rules this amendment mechanism is permitted to touch. Nothing else may be added or removed.
 AMENDABLE_ADD_RULES: Tuple[str, ...] = LIVE_AUTHORIZATION_RULE_IDS
@@ -59,8 +65,11 @@ AMENDMENT_ARTIFACTS: Tuple[str, ...] = (
     "infra/approved_infra.json",
 )
 
-#: Verdict codes.
-OWNER_SIGNATURE_REQUIRED = "OWNER_SIGNATURE_REQUIRED"
+#: Verdict codes. The owner-signature codes come from the trust root so the two cannot drift.
+OWNER_SIGNATURE_REQUIRED = owner_authority.SIGNATURE_REQUIRED
+OWNER_AUTHORITY_KEY_NOT_CONFIGURED = owner_authority.KEY_NOT_CONFIGURED
+OWNER_SIGNATURE_INVALID = owner_authority.SIGNATURE_INVALID
+OWNER_SIGNATURE_VALID = owner_authority.SIGNATURE_VALID
 AMENDMENT_EXPIRED = "AMENDMENT_EXPIRED"
 AMENDMENT_ADD_NOT_PERMITTED = "AMENDMENT_ADD_NOT_PERMITTED"
 AMENDMENT_REMOVE_NOT_PERMITTED = "AMENDMENT_REMOVE_NOT_PERMITTED"
@@ -91,16 +100,21 @@ def _aware(value: Any, field: str) -> datetime:
 
 @dataclass(frozen=True)
 class AmendmentProposal:
-    """An owner-signed description of the intended constitutional change."""
+    """An owner-SIGNED description of the intended constitutional change.
+
+    There is deliberately no ``owner_signed`` boolean. Authority is the ``signature`` field: an
+    HMAC-SHA256 tag over ``signed_payload()`` produced with the owner key. A boolean can be set by
+    any caller, so it would make the whole amendment mechanism forgeable.
+    """
 
     amendment_id: str
     adds_rules: Tuple[str, ...]
     removes_rules: Tuple[str, ...]
     target_mode: str
-    owner_signed: bool
     issued_at: str
     expires_at: str
     rationale: str = ""
+    signature: str = ""
 
     def __post_init__(self) -> None:
         if not str(self.amendment_id).strip():
@@ -112,13 +126,25 @@ class AmendmentProposal:
             object.__setattr__(self, name, tuple(str(item) for item in value))
         if not str(self.target_mode).strip():
             raise AmendmentError("target_mode is required")
+        if not isinstance(self.signature, str):
+            raise AmendmentError("amendment signature must be a string")
         issued = _aware(self.issued_at, "issued_at")
         expires = _aware(self.expires_at, "expires_at")
         if expires <= issued:
             raise AmendmentError("amendment expires_at must be after issued_at")
 
+    def signed_payload(self) -> bytes:
+        """The canonical bytes the owner signs. The signature itself is excluded."""
+        body = asdict(self)
+        body.pop("signature", None)
+        return canonical_json(body)
+
+    def claim_owner_signed(self) -> bool:
+        """Whether this proposal carries a signature that verifies against the owner key."""
+        return verify_owner_signature(self.signed_payload(), self.signature)[0]
+
     def content_hash(self) -> str:
-        return hashlib.sha256(canonical_json(asdict(self))).hexdigest()
+        return hashlib.sha256(self.signed_payload()).hexdigest()
 
     def is_current(self, now: datetime) -> bool:
         return _aware(self.issued_at, "issued_at") <= now.astimezone(timezone.utc) \
@@ -192,6 +218,7 @@ def live_release_requirements(*, boundary: Optional[FrozenLiveBoundary] = None) 
         "current_mode": basis.mode,
         "current_rule_count": len(basis.rule_ids),
         "frozen_config_guard_permitted_modes": list(basis.permitted_modes),
+        "owner_authority": owner_authority_status(),
         "prohibition_rule_present": sorted(set(FROZEN_PROHIBITION_RULE_IDS) & set(basis.rule_ids)),
         "authorization_rule_present": sorted(set(LIVE_AUTHORIZATION_RULE_IDS) & set(basis.rule_ids)),
         "required_change": {
@@ -241,9 +268,11 @@ def verify_amendment(proposal: AmendmentProposal, *, current_rule_ids: Optional[
                 "proposal_hash": proposal.content_hash(),
                 "current_rule_count": len(current)}
 
-    if not proposal.owner_signed:
-        return refuse(OWNER_SIGNATURE_REQUIRED,
-                      "amendment is not owner-signed; no other actor may amend the Constitution")
+    signed_ok, signed_code, signed_detail = verify_owner_signature(
+        proposal.signed_payload(), proposal.signature)
+    if not signed_ok:
+        return refuse(signed_code,
+                      f"{signed_detail}; only the owner may amend the Constitution")
     if not proposal.is_current(now):
         return refuse(AMENDMENT_EXPIRED, "amendment is outside its validity window")
 

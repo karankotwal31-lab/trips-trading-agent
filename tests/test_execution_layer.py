@@ -19,6 +19,7 @@ placeholder.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -40,6 +41,7 @@ from execution import (  # noqa: E402
     CORE_CAPABILITIES,
     EVIDENCE_ALLOWLIST,
     JOURNAL_FILE,
+    OWNER_AUTHORITY_KEY_ENV,
     PRECONDITIONS,
     TRADE_VALID_FIELDS,
     AdapterRegistry,
@@ -64,6 +66,7 @@ from execution import (  # noqa: E402
     live_release_requirements,
     release_basis_from_verdict,
     route_frozen_cycle,
+    sign_owner_payload,
     verify_amendment,
     Actor,
     AuthorityGate,
@@ -327,6 +330,54 @@ def portfolio(**overrides):
             "positions": {}, "quantities": {}, "exposure": 0.0}
     base.update(overrides)
     return PortfolioSnapshot(**base)
+
+
+#: A synthetic owner authority key (>=32 bytes). TEST FIXTURE ONLY - the real key never lives
+#: in the repository, and an unconfigured key means no owner act can be performed at all.
+TEST_OWNER_KEY = "test-only-owner-authority-key-0123456789abcdef"
+
+
+@contextmanager
+def owner_key_configured(key: str = TEST_OWNER_KEY):
+    """Install a synthetic owner authority key for the duration of the block."""
+    previous = os.environ.get(OWNER_AUTHORITY_KEY_ENV)
+    os.environ[OWNER_AUTHORITY_KEY_ENV] = key
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(OWNER_AUTHORITY_KEY_ENV, None)
+        else:
+            os.environ[OWNER_AUTHORITY_KEY_ENV] = previous
+
+
+@contextmanager
+def owner_key_unconfigured():
+    """Remove every owner key source, so fail-closed behaviour can be asserted."""
+    previous = os.environ.pop(OWNER_AUTHORITY_KEY_ENV, None)
+    previous_file = os.environ.pop("TRIPS_OWNER_AUTHORITY_KEY_FILE", None)
+    try:
+        yield
+    finally:
+        if previous is not None:
+            os.environ[OWNER_AUTHORITY_KEY_ENV] = previous
+        if previous_file is not None:
+            os.environ["TRIPS_OWNER_AUTHORITY_KEY_FILE"] = previous_file
+
+
+def signed_authorization(**overrides) -> LiveAuthorization:
+    """An owner-SIGNED live authorization. Unsigned artifacts are not authorizations at all."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "strategy_build_id": "b" * 64, "config_id": "c" * 64, "risk_profile_id": "r" * 64,
+        "governor_profile_id": "g" * 64, "broker_id": "test-double", "account_id": "ACCT-1",
+        "environment": "TEST_ENV",
+        "issued_at": (now - timedelta(minutes=1)).isoformat(),
+        "expires_at": (now + timedelta(hours=1)).isoformat(),
+    }
+    payload.update(overrides)
+    unsigned = LiveAuthorization(**payload)
+    return replace(unsigned, signature=sign_owner_payload(unsigned.signed_payload()))
 
 
 def in_session_now() -> datetime:
@@ -704,29 +755,24 @@ def test_preflight_requires_a_live_environment_attestation():
 
 
 def test_preflight_detects_authorization_drift():
-    auth = LiveAuthorization(strategy_build_id="x" * 64, config_id="y" * 64, risk_profile_id="z" * 64,
-                             governor_profile_id="w" * 64, broker_id="test-double",
-                             account_id="ACCT-1", environment="TEST_ENV",
-                             issued_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
-                             expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-                             owner_signed=True)
-    report = make_evaluator(authorization=auth, provider=DemoProvider()).evaluate(
-        intent=intent(), portfolio=portfolio(), price=100.0)
+    with owner_key_configured():
+        auth = signed_authorization(strategy_build_id="x" * 64, config_id="y" * 64,
+                                    risk_profile_id="z" * 64, governor_profile_id="w" * 64)
+        report = make_evaluator(authorization=auth, provider=DemoProvider()).evaluate(
+            intent=intent(), portfolio=portfolio(), price=100.0)
     assert report.artifacts["authorization_drift"]
     assert "approved_capital_governor_profile" in report.failing
 
 
 def test_preflight_authorization_without_drift_passes_that_precondition():
     current = current_identity(config=approved_config(), governor_profile_hash=governor().profile_hash)
-    auth = LiveAuthorization(strategy_build_id=current["build_hash"], config_id=current["config_hash"],
-                             risk_profile_id=current["risk_profile_hash"],
-                             governor_profile_id=current["governor_profile_hash"],
-                             broker_id="test-double", account_id="ACCT-1", environment="TEST_ENV",
-                             issued_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
-                             expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-                             owner_signed=True)
-    report = make_evaluator(authorization=auth, provider=DemoProvider()).evaluate(
-        intent=intent(), portfolio=portfolio(), price=100.0)
+    with owner_key_configured():
+        auth = signed_authorization(strategy_build_id=current["build_hash"],
+                                    config_id=current["config_hash"],
+                                    risk_profile_id=current["risk_profile_hash"],
+                                    governor_profile_id=current["governor_profile_hash"])
+        report = make_evaluator(authorization=auth, provider=DemoProvider()).evaluate(
+            intent=intent(), portfolio=portfolio(), price=100.0)
     assert report.artifacts["authorization_drift"] == []
     assert "approved_capital_governor_profile" not in report.failing
 
@@ -1169,16 +1215,15 @@ def test_no_component_other_than_the_owner_can_promote():
 
 
 def valid_authorization():
-    now = datetime.now(timezone.utc)
-    return LiveAuthorization(strategy_build_id="b", config_id="c", risk_profile_id="r",
-                             governor_profile_id="g", broker_id="test-double", account_id="ACCT-1",
-                             environment="TEST_ENV", issued_at=(now - timedelta(minutes=1)).isoformat(),
-                             expires_at=(now + timedelta(hours=1)).isoformat(), owner_signed=True)
+    """An owner-signed artifact. Requires the owner key to be configured at signing time."""
+    return signed_authorization(broker_id="test-double", account_id="ACCT-1",
+                                environment="TEST_ENV")
 
 
 def test_live_enabled_is_unreachable_even_with_a_valid_owner_authorization():
-    outcome = Lifecycle(Stage.LIVE_LOCKED).advance(Stage.LIVE_ENABLED, actor=Actor.OWNER,
-                                                   authorization=valid_authorization())
+    with owner_key_configured():
+        outcome = Lifecycle(Stage.LIVE_LOCKED).advance(Stage.LIVE_ENABLED, actor=Actor.OWNER,
+                                                       authorization=valid_authorization())
     assert outcome["advanced"] is False
     assert outcome["code"] == "LIVE_LOCKED_REFUSAL"
 
@@ -1190,7 +1235,7 @@ def test_live_enabled_requires_an_authorization_artifact_at_all():
 
 
 def test_live_authorization_drift_is_refused_even_with_a_releasing_boundary():
-    with isolated_store():
+    with isolated_store(), owner_key_configured():
         outcome = Lifecycle(Stage.LIVE_LOCKED, ReleasingBoundary()).advance(
             Stage.LIVE_ENABLED, actor=Actor.OWNER, authorization=valid_authorization(),
             config=approved_config(), governor_profile_hash="a" * 64)
@@ -1205,11 +1250,14 @@ def test_default_stage_is_live_locked():
 def test_authorization_drift_detects_material_change():
     gov = governor()
     base = current_identity(config=approved_config(), governor_profile_hash=gov.profile_hash)
-    auth = LiveAuthorization(strategy_build_id=base["build_hash"], config_id=base["config_hash"],
-                             risk_profile_id=base["risk_profile_hash"],
-                             governor_profile_id=base["governor_profile_hash"], broker_id="b",
-                             account_id="a", environment="e", issued_at="2026-01-01T00:00:00+00:00",
-                             expires_at="2026-01-01T01:00:00+00:00", owner_signed=True)
+    with owner_key_configured():
+        auth = signed_authorization(strategy_build_id=base["build_hash"],
+                                    config_id=base["config_hash"],
+                                    risk_profile_id=base["risk_profile_hash"],
+                                    governor_profile_id=base["governor_profile_hash"], broker_id="b",
+                                    account_id="a", environment="e",
+                                    issued_at="2026-01-01T00:00:00+00:00",
+                                    expires_at="2026-01-01T01:00:00+00:00")
     drifted, reasons = authorization_drift(auth, base)
     assert drifted is False and reasons == []
 
