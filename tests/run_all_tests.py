@@ -29,6 +29,7 @@ SUITES = (
     ("student-integration", [sys.executable, "tests/test_student_integration.py"], {}),
     ("execution-layer", [sys.executable, "tests/test_execution_layer.py"], {}),
     ("task-safety-kernel", [sys.executable, "tests/test_task_safety_kernel.py"], {}),
+    ("commodity-readiness", [sys.executable, "tests/test_commodity_readiness.py"], {}),
     ("live-gate-amendment", [sys.executable, "tests/test_live_gate_amendment.py"], {}),
     ("live-readiness", [sys.executable, "tests/test_live_readiness.py"], {}),
     ("execution-evidence", [sys.executable, "tests/test_execution_evidence.py"], {}),
