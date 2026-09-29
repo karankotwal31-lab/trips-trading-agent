@@ -1,5 +1,9 @@
 # Trip's v0.7 — Neon Production Activation Report
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 ## Scope
 Infrastructure only. No frozen v0.6 core file was changed.
 
@@ -8,7 +12,7 @@ Infrastructure only. No frozen v0.6 core file was changed.
 - Created bounded SECURITY DEFINER read/write functions.
 - Created `trips_runtime_exec` NOLOGIN capability role and restricted `trips_runtime_app` login.
 - Created `trips_dashboard_exec` NOLOGIN read-only capability role and restricted `trips_dashboard_app` login identity.
-- Bootstrapped the authoritative paper runtime once from the core's own initializer.
+- Historical frozen-core fact: bootstrapped the authoritative runtime once from the core's initializer while the frozen configuration was `mode=paper`; this is not a simulated-broker stage in the current execution lifecycle.
 - Stored a truth-labelled initial dashboard snapshot and infrastructure heartbeat.
 - Retired the rejected over-privileged experimental runtime role after verifying it owned zero objects.
 

@@ -41,5 +41,5 @@ jobs:
           cat /tmp/trips-forward-report.json
       - name: Research tests
         run: python research/tests/run_research_tests.py
-      - name: PR-2 scope guard
-        run: python research/tools/check_scope.py --profile pr2
+      - name: PR-3 scope guard
+        run: python research/tools/check_scope.py --profile pr3

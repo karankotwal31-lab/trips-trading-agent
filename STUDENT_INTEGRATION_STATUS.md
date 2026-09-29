@@ -1,5 +1,9 @@
 # Trip's v0.8 Student Integration Status
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 Implemented and executable:
 - Student episode model for trades/rejections/no-trade evidence
 - append-only hash-linked Student memory
@@ -26,7 +30,7 @@ Not yet claimed:
 - Student has not learned from genuine market observations yet.
 - No real-data provider has been enabled.
 - No strategy edge has been proven.
-- No live-money execution exists or is authorized.
+- At this historical checkpoint, no live-money execution was authorized. A live-money-only execution path now exists in code, but live transmission remains locked under D1.
 
 Next integration gate:
 Wire Student read-only observation/recall hooks into the cycle and add an additive Neon Student schema

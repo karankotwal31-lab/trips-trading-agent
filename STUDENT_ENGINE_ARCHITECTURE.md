@@ -1,8 +1,14 @@
 # Trip's Student Engine v0.1 — Architecture Contract
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 STATUS: DESIGN/SHADOW ONLY. NO EXECUTION AUTHORITY.
 
 ## Purpose
+References below to paper trades/outcomes describe frozen-core or historical research evidence, not a current broker-paper stage.
+
 Turn Trip's immutable evidence (paper trades, rejected setups, decisions, escalations, market regimes and replay results) into auditable lessons and testable strategy hypotheses.
 
 ## Authority boundary

@@ -1,5 +1,9 @@
 # Historical: Neon Pre-Production Dry Run
 
+> **Current enforced truth — owner decision D1:** Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data. Strategy verdict: UNPROVEN.
+>
+> Historical wording below is retained as historical evidence. Where older wording conflicts with this statement, D1 governs.
+
 This report records the pre-production test-branch stage. Production activation has since progressed; see `NEON_PRODUCTION_STATUS.md` and `INFRASTRUCTURE_STATUS.md`.
 
 # Trip's v0.7.1 — Neon Pre-Production Dry Run
