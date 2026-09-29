@@ -601,7 +601,37 @@ def test_the_data_health_logic_fails_closed_on_stale_data_and_an_unprovable_sess
     verdict = evaluate_market_data(provider, "SPY", now=NOW, max_age_minutes=120, min_bars=60)
     assert verdict["healthy"] is False
     assert verdict["trade_eligible"] is False
-    assert verdict["detail"]["session"]["status"] in {"UNKNOWN", "CLOSED"}
+    # The session is a property of the CLOCK, not of the data. During trading hours the session is
+    # genuinely open, and that is a correct reading - what is stale is the data. Only an instant
+    # the calendar cannot speak to may not claim an open session.
+    assert verdict["detail"]["session"]["status"] in {"OPEN", "UNKNOWN", "CLOSED"}
+    far = evaluate_market_data(provider, "SPY", now=NOW + timedelta(days=800), max_age_minutes=120,
+                               min_bars=60)
+    assert far["detail"]["session"]["status"] == "UNKNOWN", (
+        "beyond the calendar's validity window the session must be UNKNOWN, never OPEN")
+    assert far["healthy"] is False and far["trade_eligible"] is False
+
+
+def test_the_data_health_readiness_check_does_not_depend_on_the_time_of_day():
+    """Regression: the check asserted the session was not OPEN, so it passed at 3am and failed at
+    10am. A safety check whose verdict moves with the wall clock is not a safety check.
+
+    Swept across every hour of a weekday and across four holidays; the result must be identical.
+    """
+    from execution.readiness import _check_data_health
+
+    verdicts = {}
+    for hour in range(24):
+        instant = datetime(2026, 6, 10, hour, 30, tzinfo=timezone.utc)  # a Wednesday
+        record = _check_data_health(instant)
+        assert record.passed is True, f"failed at {hour:02d}:30 UTC - {record.detail}"
+        verdicts.setdefault(record.detail, []).append(hour)
+    for holiday in ("2026-01-01", "2026-07-04", "2026-11-26", "2026-12-25"):
+        year, month, day = (int(part) for part in holiday.split("-"))
+        record = _check_data_health(datetime(year, month, day, 15, 0, tzinfo=timezone.utc))
+        assert record.passed is True, f"failed on {holiday}: {record.detail}"
+    # And it reports the same reasons everywhere, not merely a passing boolean.
+    assert len(verdicts) == 1, f"the check's detail varied with the clock: {verdicts}"
 
 
 def test_closed_60_minute_bar_evidence_refuses_an_unclosed_or_off_grid_series():

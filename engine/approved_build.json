@@ -41,7 +41,7 @@
     "engine/execution/owner_authority.py": "82474e23b10d9487df38a99b715539c4d80fb0844c6f6bea823b1c8ec131c58a",
     "engine/execution/preflight.py": "374bee470b1b6b4c7c23c4a251bf4f4ca8eaffc3340b735b8c08f3b8bea7b08d",
     "engine/execution/provenance.py": "6e7551a0f63a3edac03cc1669c64c6d0378afd887d505fd9bf226df912fcc489",
-    "engine/execution/readiness.py": "476a241d706eb8da203f1ff8dfd87f86641d27cffbb3ec6306e9f495f60b79e3",
+    "engine/execution/readiness.py": "c441911ae738c5ffd27f27d870d42e0979144e80fd358305d0851840bea2d69b",
     "engine/execution/reconciliation.py": "5a4327b29de213432ed8e8f35d850f97649f956ce39b50f9aed08ea741c7d7ee",
     "engine/execution/registry.py": "7017e15566f562af9e084d2e40773589e9b048dc8f7365a35132727e86669f8e",
     "engine/execution/session.py": "7c1fa674d63d7fee3455624c9dbefbf4a7e88fecef1c70ef7aa07a4f4d206285",
@@ -67,6 +67,6 @@
     "engine/supervisor_relay.py": "d38b065edbbe858aaa26ea789bda5b01209991fb8d059760994ae1faeb2e6202",
     "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e"
   },
-  "manifest_hash": "cb0dad10cb3495e199687a775f218bc08c99ae66ccbb5477de9ea9ae38f79d58",
+  "manifest_hash": "9ae35421ef347333a23d472d1be9e0251e1a3ad27b6806f396ed4f2480cf8d88",
   "schema_version": 2
 }
