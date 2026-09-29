@@ -7,7 +7,7 @@
     "docs/styles.css": "7350648528dfad4baf20a04bd996eb0e4d04030d0ba33b79a04febdf27c21b82",
     "engine/ack_escalation.py": "d0eab96744e5fb5c4d4a010fe5aefba0bfefc3c767728d815cf4c9e276f941c8",
     "engine/backtest.py": "b8c0571f191281246254a0f68a807316bc58931710171a512130cd19250f37b1",
-    "engine/build_guard.py": "1b050301c79544b186715b2d952f8bfd10e1d4b734d4cd615d3010772bb265ba",
+    "engine/build_guard.py": "cae0a6ca5e66545e5d315774e4dd974e396593b603d510ed79fd6cdcb6307b23",
     "engine/candle_intelligence.py": "8ab0fbcf12e6fb699827bef77ade95b150274787f8c3024472de994edc998259",
     "engine/capability_registry.json": "1ee873a22df78bda77061ef412da240173cd11b26ec0636677d9120fd374ac62",
     "engine/chaos_diagnostics.py": "765f45e33a9570416c6208c7b921411a6cf7ec6b42a0bfb3c5a71866e60614b9",
@@ -65,8 +65,9 @@
     "engine/supervisor_bridge.py": "d292f7359bd8eb9a474886ddb51e93b72c2ce810b7e89af03952144994ff1e90",
     "engine/supervisor_counsel.py": "c3b048a95c45a56f8646c8002d8abe03dc1eb3ffaeced4032496aa1dbb970793",
     "engine/supervisor_relay.py": "d38b065edbbe858aaa26ea789bda5b01209991fb8d059760994ae1faeb2e6202",
-    "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e"
+    "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e",
+    "scripts/sign_owner_artifact.py": "3204048c7ee413b465800477165a656429943ed61407c2f302e1f4cb6bd3b438"
   },
-  "manifest_hash": "37382214d00f674b6cc1507e5d478fa1edc0b24cacf659d025ad1fa9f69c0095",
+  "manifest_hash": "0fd28b3518271e7124d0058eb5b63e03310e165c0993c05df6318fba68717522",
   "schema_version": 2
 }
