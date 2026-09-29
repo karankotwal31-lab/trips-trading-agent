@@ -21,11 +21,15 @@ jobs:
         run: |
           set -euo pipefail
           sha256sum -c infra/core_v06.sha256
+      - name: Confirm interpreter
+        run: |
+          set -euo pipefail
+          python3 --version
       - name: Verify infrastructure manifest
-        run: python infra/verify_infra.py
+        run: python3 infra/verify_infra.py
       - name: Verify safety-suite integrity
-        run: python tests/suite_integrity.py
+        run: python3 tests/suite_integrity.py
       - name: All safety suites
-        run: python tests/run_all_tests.py
+        run: python3 tests/run_all_tests.py
       - name: Execution-layer live-lock status
-        run: PYTHONPATH=engine python engine/execution/status.py
+        run: PYTHONPATH=engine python3 engine/execution/status.py
