@@ -168,7 +168,8 @@ OWNER_BLOCKING_ITEMS: Tuple["BlockerItem", ...] = (
                      "a per-capability conformance suite producing typed, versioned evidence",
                      "a reconciliation engine executed against known-agreeing and "
                      "known-disagreeing fixtures",
-                     "RECORDED_CONTRACT_CONFORMANCE evidence for implementation behaviour"),
+                     "RECORDED_CONTRACT_CONFORMANCE evidence for implementation behaviour",
+                     "a non-mutating production bootstrap for broker/account verification"),
         owner=("LIVE_READ_ONLY_BROKER_VERIFICATION against the intended real live brokerage "
                "account: credentials and the owner's OAuth approval for that account",)),
     BlockerItem(
@@ -178,7 +179,8 @@ OWNER_BLOCKING_ITEMS: Tuple["BlockerItem", ...] = (
                      "a data-provenance guard separating market data from broker execution feeds",
                      "closed 60-minute bars enforced through the frozen closure rule",
                      "exchange-calendar and session integration",
-                     "fail-closed data-health logic"),
+                     "fail-closed data-health logic",
+                     "independent dual-source production market-data verification"),
         owner=("the provider API key, subscription and real-time entitlement where required",)),
     BlockerItem(
         name="owner_signed_live_authorization",
