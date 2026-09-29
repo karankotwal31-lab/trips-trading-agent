@@ -277,7 +277,8 @@ class Lifecycle:
     def __init__(self, stage: Stage = DEFAULT_STAGE, boundary: Optional[FrozenLiveBoundary] = None,
                  release_basis: Optional[CoreStateBasis] = None,
                  authorization: Optional[LiveAuthorization] = None,
-                 live_verification: Optional[Mapping[str, Any]] = None) -> None:
+                 live_verification: Optional[Mapping[str, Any]] = None,
+                 production_data_verification: Optional[Any] = None) -> None:
         self._stage = Stage(stage)
         self._boundary = boundary or FrozenLiveBoundary()
         if release_basis is not None and release_basis.source not in CORE_STATE_SOURCES:
@@ -298,6 +299,9 @@ class Lifecycle:
         # Keep the complete typed verification envelope. Bare record maps discard the broker,
         # account and environment binding and can never authorize LIVE_ENABLED.
         self._live_verification = live_verification
+        # Broker/account evidence and market-data Truth evidence are separate authorities.
+        # Neither may substitute for the other.
+        self._production_data_verification = production_data_verification
 
     @property
     def authorization(self) -> Optional[LiveAuthorization]:
@@ -375,6 +379,7 @@ class Lifecycle:
                 "every check executes the subsystem it names and reports a digest over the "
                 "observation; module presence is not engineering completion"),
             "live_read_only_broker_verification": self.live_verification_status(),
+            "production_market_data_verification": self.production_data_status(),
             "conformance_evidence": {
                 broker_id: {
                     "digest": document.digest(),
@@ -530,17 +535,6 @@ class Lifecycle:
                     f"live broker verification did not prove all required instruments: "
                     f"{sorted(required - available)}")
 
-            entitlement_record = records.get("verify_live_market_data_entitlement")
-            entitlement_obs = dict(getattr(entitlement_record, "observation", {}) or {})
-            entitlement_symbols = {str(s).upper()
-                                   for s in entitlement_obs.get("symbols", ())}
-            if entitlement_obs.get("entitled") is not True:
-                binding_reasons.append("live market-data entitlement was not proven")
-            if not required.issubset(entitlement_symbols):
-                binding_reasons.append(
-                    f"live market-data entitlement does not cover: "
-                    f"{sorted(required - entitlement_symbols)}")
-
             authorization_bound = not binding_reasons
 
         activation_verified = bool(evidence_verified and authorization_bound)
@@ -559,9 +553,78 @@ class Lifecycle:
             "submits_no_order": True,
             "releases_capital": False,
             "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
-            "note": ("Twelve non-mutating checks against the intended real live account. "
-                     "Activation additionally requires exact broker/account binding to the owner "
-                     "authorization; recorded fixtures and bare record maps cannot satisfy it."),
+            "note": ("Eleven non-mutating broker/account checks against the intended real live "
+                     "account. Production market-data Truth is verified independently; recorded "
+                     "fixtures and bare record maps cannot satisfy either activation requirement."),
+        }
+
+    def production_data_status(self, *, now: datetime | None = None) -> Dict[str, Any]:
+        """Validate fresh typed dual-source production Truth evidence."""
+        from .production_data import (EVIDENCE_KIND_PRODUCTION_DATA,
+                                      ProductionDataVerification, REQUIRED_SYMBOLS)
+
+        verification = self._production_data_verification
+        if verification is None:
+            return {
+                "evidence_kind": EVIDENCE_KIND_PRODUCTION_DATA,
+                "status": "NOT_VERIFIED", "verified": False,
+                "reasons": ["no production dual-source Truth verification is installed"],
+                "required_symbols": list(REQUIRED_SYMBOLS),
+                "releases_capital": False,
+                "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
+            }
+        if not isinstance(verification, ProductionDataVerification):
+            return {
+                "evidence_kind": EVIDENCE_KIND_PRODUCTION_DATA,
+                "status": "NOT_VERIFIED", "verified": False,
+                "reasons": ["production-data evidence is not the typed verification envelope"],
+                "required_symbols": list(REQUIRED_SYMBOLS),
+                "releases_capital": False,
+                "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
+            }
+
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        reasons: List[str] = []
+        try:
+            generated = datetime.fromisoformat(
+                str(verification.generated_at).replace("Z", "+00:00"))
+            if generated.tzinfo is None:
+                raise ValueError("generated_at is naive")
+            age = (now - generated.astimezone(timezone.utc)).total_seconds()
+            if age < -300:
+                reasons.append("production-data evidence timestamp is implausibly in the future")
+            elif age > LIVE_VERIFICATION_MAX_AGE_SECONDS:
+                reasons.append(
+                    f"production-data evidence is stale ({age:.0f}s > "
+                    f"{LIVE_VERIFICATION_MAX_AGE_SECONDS}s)")
+        except Exception:
+            reasons.append("production-data generated_at is unusable")
+
+        if verification.evidence_kind != EVIDENCE_KIND_PRODUCTION_DATA:
+            reasons.append("production-data evidence kind is invalid")
+        if verification.primary_family == verification.secondary_family:
+            reasons.append("production-data provider families are not independent")
+        if verification.missing_symbols:
+            reasons.append(
+                f"production-data evidence is missing symbols {list(verification.missing_symbols)}")
+        if verification.failed_symbols:
+            reasons.append(
+                f"production-data evidence failed symbols {list(verification.failed_symbols)}")
+
+        verified = bool(verification.verified and not reasons)
+        return {
+            "evidence_kind": EVIDENCE_KIND_PRODUCTION_DATA,
+            "status": "VERIFIED" if verified else "NOT_VERIFIED",
+            "verified": verified,
+            "primary_source": verification.primary_source,
+            "primary_family": verification.primary_family,
+            "secondary_source": verification.secondary_source,
+            "secondary_family": verification.secondary_family,
+            "required_symbols": list(REQUIRED_SYMBOLS),
+            "reasons": reasons,
+            "digest": verification.digest(),
+            "releases_capital": False,
+            "max_age_seconds": LIVE_VERIFICATION_MAX_AGE_SECONDS,
         }
 
     def advance(self, to: Stage, *, actor: Actor, authorization: Optional[LiveAuthorization] = None,
@@ -625,6 +688,16 @@ class Lifecycle:
                     "stage": self._stage.value,
                     "reason": "; ".join(live_verification["reasons"]),
                     "live_verification": live_verification,
+                }
+
+            production_data = self.production_data_status(now=now)
+            if not production_data["verified"]:
+                return {
+                    "advanced": False,
+                    "code": "LIVE_ENABLE_REFUSED_PRODUCTION_DATA_VERIFICATION",
+                    "stage": self._stage.value,
+                    "reason": "; ".join(production_data["reasons"]),
+                    "production_data_verification": production_data,
                 }
 
             missing_identity = []
