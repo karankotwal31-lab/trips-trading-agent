@@ -1,0 +1,25 @@
+name: Trips Safety Suites
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety-suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The gate is defined once in scripts/verify_all.sh so that a local run, a pre-push hook and
+      # CI all execute byte-identical checks. This workflow is deliberately left enabled even
+      # while Actions is blocked: a visibly failing check that says "this never ran" is honest,
+      # whereas silently skipping the gate would make every safety claim here unverified.
+      - name: Run Trip's safety gate
+        run: sh ./scripts/verify_all.sh
