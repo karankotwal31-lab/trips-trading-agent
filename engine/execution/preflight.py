@@ -343,12 +343,15 @@ class PreflightEvaluator:
         registry_verdict: Mapping[str, Any] = {"permitted": False, "reasons": ["not evaluated"]}
         adapter = self.adapter
         try:
-            registration = self.registry.require_executable(getattr(adapter, "broker_id", ""))
-            registry_verdict = self.registry.execution_verdict(registration)
+            registration = self.registry.require_executable(getattr(adapter, "broker_id", ""),
+                                                            scope=sorted(approved_symbol_scope()))
+            registry_verdict = self.registry.execution_verdict(
+                registration, scope=sorted(approved_symbol_scope()))
         except Exception as exc:
             registry_verdict = {"permitted": False, "reasons": [str(exc)]}
         add("correct_authorized_broker_adapter", registry_verdict["permitted"],
-            "; ".join(registry_verdict["reasons"]) or "registered, authorized and fully capable")
+            "; ".join(registry_verdict["reasons"]) or
+            "registered, authorized, fully capable and mandate-compatible")
         artifacts["broker_registry"] = dict(registry_verdict)
 
         account: Any = None

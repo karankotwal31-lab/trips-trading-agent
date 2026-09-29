@@ -41,6 +41,7 @@ from .contracts import (
     assert_preserves_economic_meaning,
     assert_transition_allowed,
     approved_symbol_scope,
+    canonical_economic_representation,
     check_representable,
     decision_bar_is_closed,
 )
@@ -78,6 +79,7 @@ class SubmissionOutcome(str, Enum):
     REFUSED_BY_SCOPE = "REFUSED_BY_SCOPE"
     REFUSED_BY_CAPABILITY = "REFUSED_BY_CAPABILITY"
     ORDER_INCOMPATIBLE = "ORDER_INCOMPATIBLE"
+    MANDATE_INCOMPATIBLE = "MANDATE_INCOMPATIBLE"
     SUPERVISOR_BLOCKED_NEW_EXPOSURE = "SUPERVISOR_BLOCKED_NEW_EXPOSURE"
     BROKER_STATE_CHANGED = "BROKER_STATE_CHANGED"
     REFUSED_BY_AUTHORITY = "REFUSED_BY_AUTHORITY"
@@ -390,11 +392,19 @@ class UniversalBrokerGateway:
         if violation:
             return result(SubmissionOutcome.REFUSED_BY_SCOPE, ExecutionState.REFUSED, reasons=(violation,))
 
-        # 4. Capability contract. UNVERIFIED fails closed.
+        # 4. Capability contract. UNVERIFIED fails closed, capability by capability.
         missing = self._adapter.capability_matrix().missing_core()
         if missing:
             return result(SubmissionOutcome.REFUSED_BY_CAPABILITY, ExecutionState.REFUSED,
                           reasons=(f"{CAPABILITY_UNSUPPORTED}: missing core capabilities {missing}",))
+
+        # 4a. Mandate compatibility. A fully conformant broker is still the wrong broker if it does
+        #     not serve this instrument mandate, and generic conformance can never override that.
+        mandate = getattr(self._adapter, "mandate_verdict", None)
+        verdict = mandate(approved_symbol_scope()) if callable(mandate) else None
+        if isinstance(verdict, Mapping) and not verdict.get("permitted", False):
+            return result(SubmissionOutcome.MANDATE_INCOMPATIBLE, ExecutionState.REFUSED,
+                          reasons=tuple(verdict.get("reasons") or ("mandate compatibility unverified",)))
 
         # 4b. Decision-bar closure, re-proven at the moment of transmission. A signal derived from
         #     an incomplete bar may never be sent, including after an outage or restart.
@@ -459,17 +469,29 @@ class UniversalBrokerGateway:
                           gate=decision, boundary=boundary["boundary"],
                           reconciliation=observables["reconciliation"])
 
-        # 8. Translation BEFORE reservation: a broker that cannot represent the approved intent
-        #    must not consume a submission reservation. Then reserve atomically, then transmit.
+        # 8. Translation BEFORE reservation, in a fixed order.
+        #    8a. Validate the CANONICAL ECONOMICS - symbol, side, quantity, order_type,
+        #        time_in_force, limit_price - while they are still broker-neutral. Nothing
+        #        provider-native exists yet, so a defect here cannot have reached a broker.
+        #    8b. Only then may the adapter serialize them into Alpaca/Upstox field names.
+        #    8c. Only then is the adapter's own payload decoded back and proven equal. A broker
+        #        that cannot round-trip its own representation does not get the order.
         try:
-            representation = self._adapter.represent_intent(intent)
+            economic = canonical_economic_representation(intent)
+        except Exception as exc:
+            return result(SubmissionOutcome.REFUSED_BY_CAPABILITY, ExecutionState.REFUSED,
+                          reasons=(f"canonical economic representation is invalid: {exc}",),
+                          gate=decision, boundary=boundary["boundary"])
+        try:
+            representation = self._adapter.represent_intent(intent, economic=economic)
         except Exception as exc:
             return result(SubmissionOutcome.REFUSED_BY_CAPABILITY, ExecutionState.REFUSED,
                           reasons=(f"{CAPABILITY_UNSUPPORTED}: adapter could not represent the "
                                    f"approved intent ({type(exc).__name__})",),
                           gate=decision, boundary=boundary["boundary"])
         try:
-            assert_preserves_economic_meaning(intent, representation)
+            decoded = self._adapter.economic_view(representation)
+            assert_preserves_economic_meaning(economic, decoded)
         except CapabilityError as exc:
             return result(SubmissionOutcome.REFUSED_BY_CAPABILITY, ExecutionState.REFUSED,
                           reasons=(str(exc),), gate=decision, boundary=boundary["boundary"])

@@ -215,8 +215,9 @@ def build_status() -> dict:
             "artifacts_requiring_owner_review_and_reapproval": list(AMENDMENT_ARTIFACTS),
             "note": ("A verified, owner-signed amendment opens the gate using the PRODUCTION "
                      "FrozenLiveBoundary, and a verified release basis is the only way to release "
-                     "capital without the frozen files changing. Authority is an HMAC tag made with "
-                     "the owner key, never a boolean: a release basis without a valid signed live "
+                     "capital without the frozen files changing. Authority is an Ed25519 (RFC 8032) "
+                     "signature made with the owner key, never a boolean: a release basis without a "
+                     "valid signed live "
                      "authorization is refused, so owner decision A cannot imply decision B. "
                      "Applying the amendment is refused here because editing hash-pinned frozen "
                      "files and re-freezing the core manifest is an owner act."),

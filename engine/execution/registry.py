@@ -135,7 +135,8 @@ class AdapterRegistry:
                      "declares every core capability SUPPORTED."),
         }
 
-    def execution_verdict(self, registration: BrokerRegistration) -> Dict[str, Any]:
+    def execution_verdict(self, registration: BrokerRegistration,
+                          scope: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         reasons: List[str] = []
         if registration.classification in NON_EXECUTING_CLASSIFICATIONS:
             reasons.append(NON_EXECUTING_CLASSIFICATIONS[registration.classification])
@@ -145,25 +146,43 @@ class AdapterRegistry:
             reasons.append("no authorized programmable interface is recorded for this broker")
 
         missing: Sequence[str] = ()
+        mandate: Dict[str, Any] = {}
         if not reasons:
             missing = registration.adapter.capability_matrix().missing_core()
             if missing:
                 reasons.append(f"BROKER_AUTOMATION_UNSUPPORTED: missing core capabilities {list(missing)}")
+        if not reasons and scope is not None:
+            # A broker can be perfectly conformant and still be the wrong broker. Mandate
+            # compatibility is decided ONLY by mandate evidence, and it is never derived from a
+            # capability matrix, so interface conformance can never override it.
+            verdict_fn = getattr(registration.adapter, "mandate_verdict", None)
+            if not callable(verdict_fn):
+                raise UnauthorizedInterface(
+                    f"adapter for {registration.broker_id!r} cannot answer mandate compatibility")
+            mandate = dict(verdict_fn(list(scope)))
+            if not mandate.get("permitted", False):
+                reasons.append("BROKER_MANDATE_INCOMPATIBLE: "
+                               + "; ".join(mandate.get("reasons") or []))
 
         permitted = not reasons
         return {
             "permitted": permitted,
             "broker_id": registration.broker_id,
-            "code": "SUPPORTED" if permitted else "BROKER_AUTOMATION_UNSUPPORTED",
+            "code": ("SUPPORTED" if permitted
+                     else ("BROKER_MANDATE_INCOMPATIBLE"
+                           if mandate and not mandate.get("permitted", False)
+                           else "BROKER_AUTOMATION_UNSUPPORTED")),
             "reasons": reasons,
             "missing_core": list(missing),
+            "mandate": mandate,
         }
 
-    def require_executable(self, broker_id: str) -> BrokerRegistration:
+    def require_executable(self, broker_id: str,
+                            scope: Optional[Sequence[str]] = None) -> BrokerRegistration:
         registration = self.get(broker_id)
         if registration is None:
             raise BrokerAutomationUnsupported(f"broker {broker_id!r} is not registered")
-        verdict = self.execution_verdict(registration)
+        verdict = self.execution_verdict(registration, scope=scope)
         if not verdict["permitted"]:
             raise BrokerAutomationUnsupported("; ".join(verdict["reasons"]) or "interface not authorized")
         return registration
@@ -185,8 +204,13 @@ class AdapterRegistry:
                                         if matrix.status(name) is CapabilityStatus.UNVERIFIED],
             "unsupported_capabilities": [name for name in CORE_CAPABILITIES
                                          if matrix.status(name) is CapabilityStatus.UNSUPPORTED],
+            "supported_capabilities": [name for name in CORE_CAPABILITIES
+                                       if matrix.status(name) is CapabilityStatus.SUPPORTED],
             "verdict": verdict,
             "forbidden_techniques_not_used": list(FORBIDDEN_AUTOMATION_TECHNIQUES),
+            "note": ("Capabilities are resolved independently from per-capability evidence. There "
+                     "is no blanket conformance flag, and mandate compatibility is decided only by "
+                     "mandate evidence."),
         }
 
 
