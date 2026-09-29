@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "P001",
+  "title": "strategy-evidence-gate",
+  "patch": "patch.diff",
+  "test_commands": [
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_live_readiness as t; t.test_live_ready_locked_refuses_while_strategy_evidence_is_missing(); t.test_there_is_no_paper_stage_and_the_order_is_exactly_as_mandated(); t.test_live_enabled_requires_exactly_the_mandated_twelve_requirements()"
+    ],
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_execution_layer as t; t.test_preflight_reports_exactly_the_twenty_one_preconditions_in_spec_order()"
+    ],
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_execution_evidence as t; t.test_readiness_is_recomputed_from_executed_evidence_each_call()"
+    ]
+  ]
+}
