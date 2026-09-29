@@ -1,136 +1,187 @@
 """Owner authority — the trust root for every act that can create financial authority.
 
-Only the owner may amend the Constitution or authorise live trading. That claim is worthless if
-"owner-signed" is a boolean a caller can set, so this module makes it a **keyed signature**: an
-HMAC-SHA256 tag over the artifact's canonical payload, produced with a key that exists only in the
-owner's environment and is never stored in this repository.
+Asymmetric by design. The **owner's private key never enters this repository, this process, or any
+runtime environment variable**; the trading process holds only the public verification key, which
+is public material protected against substitution by build integrity
+(``engine/owner_public_key.json`` is listed in ``build_guard.CRITICAL_FILES``, so swapping it trips
+``EXECUTABLE_BUILD_LOCK``).
 
-The key is read at call time, never cached, so an environment change is always honoured.
+This replaces an earlier HMAC design. HMAC was rejected for two reasons: it required requesting a
+shared secret from the owner (a secret the process that verifies could also sign with), and a
+symmetric key in a trading process is a standing invitation to forge an owner act. With Ed25519 a
+caller with full runtime access still cannot produce a passing signature.
 
-Fail-closed rules. All of these refuse; none of them degrades:
+Why verification can only ever *reject*. :func:`verify_owner_signature` has no way to expand
+authority: with no configured key, or a malformed key, or an unknown key id, it refuses.
 
-* no key configured                     -> ``OWNER_AUTHORITY_KEY_NOT_CONFIGURED``
-* key shorter than 32 bytes             -> ``OWNER_AUTHORITY_KEY_TOO_WEAK``
-* key file unreadable or empty          -> ``OWNER_AUTHORITY_KEY_NOT_CONFIGURED``
-* artifact carries no signature         -> ``OWNER_SIGNATURE_REQUIRED``
-* signature does not match the payload  -> ``OWNER_SIGNATURE_INVALID``
+Replay protection is layered, because a single trick cannot cover all of it:
 
-Because the verifying key is never derivable from repository content, no Strategy, Risk, Governor,
-Student, Evolution, Guardian, AI Supervisor or ordinary caller can produce a passing signature.
-The residual trust assumption is stated plainly: a process that can read the owner key can sign.
-Keep the key out of the trading process's normal runtime environment except for the explicit owner
-authority step.
+1. **Domain separation.** Every signature covers a purpose tag, so a signature produced for an
+   amendment can never be replayed as a live authorization, or vice versa.
+2. **Version binding.** The envelope carries a version; a future scheme cannot be confused with
+   this one.
+3. **Key binding.** The envelope carries ``key_id`` and it must equal the pinned key's id, so a
+   signature from a rotated or unknown key is refused rather than silently accepted.
+4. **Content binding.** The signature covers the artifact's canonical payload, so any mutation
+   after signing invalidates it.
+5. **Freshness.** Both artifacts carry ``issued_at``/``expires_at`` and are checked separately.
+
+Absent key, unreadable key file, malformed key, mismatched key id, absent signature, malformed
+signature and wrong signature all refuse. Nothing here degrades.
+
+Code paths for signing (:func:`sign_owner_payload` is deliberately absent) live only in
+``scripts/sign_owner_artifact.py`` and ``engine/execution/ed25519.py``; nothing under
+``engine/execution/`` calls :func:`ed25519.sign`.
 """
 
 from __future__ import annotations
 
 import hashlib
-import hmac
-import os
+import json
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
-#: Environment variable holding the owner authority key (hex or raw text).
-KEY_ENV = "TRIPS_OWNER_AUTHORITY_KEY"
+from . import ed25519
 
-#: Alternative: a path to a file holding the owner authority key. Must live outside the repository.
-KEY_FILE_ENV = "TRIPS_OWNER_AUTHORITY_KEY_FILE"
+#: The owner public key. Pinned in build integrity; public material, never a secret.
+PUBLIC_KEY_PATH = Path(__file__).resolve().parent.parent / "owner_public_key.json"
 
-#: Shortest acceptable key. Shorter material cannot be considered a real secret.
-MIN_KEY_BYTES = 32
+SIGNATURE_VERSION = "v1"
+ALGORITHM = "ed25519"
+#: Domain separator. Any message signed outside this framing verifies as nothing.
+DOMAIN = b"TRIPS-OWNER-AUTHORITY-V1"
+
+PURPOSE_AMENDMENT = "trips.amendment-proposal"
+PURPOSE_LIVE_AUTHORIZATION = "trips.live-authorization"
+PURPOSES = (PURPOSE_AMENDMENT, PURPOSE_LIVE_AUTHORIZATION)
 
 KEY_NOT_CONFIGURED = "OWNER_AUTHORITY_KEY_NOT_CONFIGURED"
-KEY_TOO_WEAK = "OWNER_AUTHORITY_KEY_TOO_WEAK"
+KEY_MALFORMED = "OWNER_AUTHORITY_KEY_MALFORMED"
+KEY_MISMATCH = "OWNER_AUTHORITY_KEY_MISMATCH"
 SIGNATURE_REQUIRED = "OWNER_SIGNATURE_REQUIRED"
+SIGNATURE_MALFORMED = "OWNER_SIGNATURE_MALFORMED"
 SIGNATURE_INVALID = "OWNER_SIGNATURE_INVALID"
 SIGNATURE_VALID = "OWNER_SIGNATURE_VALID"
 
-ALGORITHM = "HMAC-SHA256"
+ENVELOPE_PREFIX = f"{ALGORITHM}:{SIGNATURE_VERSION}"
+
+#: Verification costs a point multiplication (~0.2s in pure Python). Owner acts are rare, but a
+#: preflight can ask the same question repeatedly inside one evaluation, so memoise on the exact
+#: inputs. The cache can only ever be *asked* about a signature it has already resolved.
+_VERIFY_CACHE: dict = {}
 
 
 class OwnerAuthorityError(Exception):
     """The owner trust root is missing or unusable, so every dependent act fails closed."""
 
 
-def _material() -> Tuple[Optional[str], str, str]:
-    """Locate the owner key material. Returns (material, source, reason)."""
-    value = os.getenv(KEY_ENV, "").strip()
-    if value:
-        return value, f"env:{KEY_ENV}", ""
+def signed_message(purpose: str, payload: bytes, key_id: str) -> bytes:
+    """Domain-separated bytes an owner signature actually covers."""
+    if purpose not in PURPOSES:
+        raise OwnerAuthorityError(f"unknown signing purpose {purpose!r}")
+    return b"\x00".join((DOMAIN, purpose.encode("ascii"), SIGNATURE_VERSION.encode("ascii"),
+                         key_id.encode("ascii"), payload))
 
-    path_value = os.getenv(KEY_FILE_ENV, "").strip()
-    if not path_value:
-        return None, "none", f"neither {KEY_ENV} nor {KEY_FILE_ENV} is configured"
 
-    path = Path(path_value)
+def key_id_for(public_key: bytes) -> str:
+    """Stable identity for a public key. Also what an envelope must carry."""
+    return hashlib.sha256(public_key).hexdigest()[:16]
+
+
+def load_public_key() -> Tuple[bytes, str, str]:
+    """Read the pinned public key. Returns ``(raw_key, key_id, reason_if_unusable)``."""
+    if not PUBLIC_KEY_PATH.exists():
+        return b"", "", f"owner public key file is missing: {PUBLIC_KEY_PATH.name}"
     try:
-        raw = path.read_text().strip()
+        document = json.loads(PUBLIC_KEY_PATH.read_text())
     except Exception as exc:
-        return None, f"file:{path_value}", f"owner key file is unreadable: {type(exc).__name__}"
-    if not raw:
-        return None, f"file:{path_value}", "owner key file is empty"
-    return raw, f"file:{path_value}", ""
-
-
-def _decode(material: str) -> bytes:
-    """Accept hex or raw text. Hex is preferred when the material is unambiguously hex."""
-    text = material.strip()
-    candidate = bytes.fromhex(text) if len(text) % 2 == 0 else None
-    if candidate is not None and len(candidate) >= MIN_KEY_BYTES // 2:
-        return candidate
-    return text.encode("utf-8")
-
-
-def owner_key() -> Tuple[Optional[bytes], str, str]:
-    """The owner key, or (None, source, reason) when it is unusable."""
-    material, source, reason = _material()
-    if material is None:
-        return None, source, reason
+        return b"", "", f"owner public key file is unreadable: {type(exc).__name__}"
+    if not isinstance(document, dict):
+        return b"", "", "owner public key file is not an object"
+    if document.get("algorithm") not in (None, ALGORITHM):
+        return b"", "", f"unsupported owner key algorithm {document.get('algorithm')!r}"
+    if not document.get("configured"):
+        return b"", "", "owner public key is not configured (awaiting the owner's key)"
+    encoded = str(document.get("public_key", "")).strip().replace(" ", "")
+    if not encoded:
+        return b"", "", "owner public key file declares configured but carries no key"
     try:
-        key = _decode(material)
+        raw = bytes.fromhex(encoded)
     except ValueError:
-        key = material.encode("utf-8")
-    if len(key) < MIN_KEY_BYTES:
-        return None, source, (f"owner key is {len(key)} bytes after decoding; "
-                              f"at least {MIN_KEY_BYTES} are required")
-    return key, source, ""
+        return b"", "", "owner public key is not valid hex"
+    if len(raw) != 32:
+        return b"", "", f"owner public key is {len(raw)} bytes; Ed25519 requires 32"
+    declared = str(document.get("key_id", "")).strip()
+    derived = key_id_for(raw)
+    if declared and declared != derived:
+        return b"", "", "owner public key file key_id does not match its key"
+    return raw, derived, ""
 
 
 def owner_authority_status() -> dict:
     """Whether owner-signed acts are possible at all. Never returns key material."""
-    key, source, reason = owner_key()
+    raw, key_id, reason = load_public_key()
+    configured = bool(raw)
     return {
-        "configured": key is not None,
-        "source": source,
+        "configured": configured,
+        "algorithm": ALGORITHM if configured else None,
+        "signature_version": SIGNATURE_VERSION if configured else None,
+        "key_id": key_id or None,
+        "key_source": f"engine/{PUBLIC_KEY_PATH.name}",
+        "protected_by": "build_guard.CRITICAL_FILES (EXECUTABLE_BUILD_LOCK)",
         "reason": reason,
-        "algorithm": ALGORITHM,
-        "key_env": KEY_ENV,
-        "key_file_env": KEY_FILE_ENV,
-        "min_key_bytes": MIN_KEY_BYTES,
-        "note": ("Owner acts fail closed while this is unconfigured: no amendment can verify and "
-                 "no live authorization can be valid."),
+        "purposes": list(PURPOSES),
+        "private_key_in_process": False,
+        "note": ("Asymmetric: this process holds only the public verification key. Owner acts "
+                 "fail closed while this is unconfigured, so an owner cannot be impersonated by "
+                 "absence of a key — only the owner's private key can produce a passing "
+                 "signature, and it never enters this repository or this process."),
     }
 
 
-def sign_owner_payload(payload: bytes) -> str:
-    """Produce the owner signature for a canonical payload. Owner-side only."""
-    key, _source, reason = owner_key()
-    if key is None:
-        raise OwnerAuthorityError(f"{KEY_NOT_CONFIGURED}: {reason}")
-    return hmac.new(key, payload, hashlib.sha256).hexdigest()
-
-
-def verify_owner_signature(payload: bytes, signature: str) -> Tuple[bool, str, str]:
-    """Verify an owner signature. Returns (ok, code, detail) and never raises."""
-    key, _source, reason = owner_key()
-    if key is None:
-        return False, KEY_NOT_CONFIGURED, f"no owner authority key is configured: {reason}"
-
-    supplied = str(signature or "").strip().lower()
+def verify_owner_signature(purpose: str, payload: bytes, envelope: str) -> Tuple[bool, str, str]:
+    """Verify an owner signature. Returns ``(ok, code, detail)`` and never raises."""
+    supplied = str(envelope or "").strip().lower()
     if not supplied:
         return False, SIGNATURE_REQUIRED, "artifact carries no owner signature"
 
-    expected = hmac.new(key, payload, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, supplied):
-        return False, SIGNATURE_INVALID, "owner signature does not match the artifact contents"
-    return True, SIGNATURE_VALID, "owner signature verified"
+    raw, key_id, reason = load_public_key()
+    if not raw:
+        return False, KEY_NOT_CONFIGURED, f"no owner authority key is configured: {reason}"
+
+    parts = supplied.split(":")
+    if len(parts) != 4 or parts[0] != ALGORITHM or parts[1] != SIGNATURE_VERSION:
+        return False, SIGNATURE_MALFORMED, (
+            f"signature envelope must be {ENVELOPE_PREFIX}:<key_id>:<hex>; refusing to guess")
+
+    _, envelope_version, envelope_key_id, signature_hex = parts
+    if envelope_version != SIGNATURE_VERSION:
+        return False, SIGNATURE_MALFORMED, (
+            f"signature version {envelope_version!r} is not {SIGNATURE_VERSION!r}")
+    if envelope_key_id != key_id:
+        # Replay of a signature produced under another key, or of a rotated-away key.
+        return False, KEY_MISMATCH, (
+            f"signature was produced for key {envelope_key_id}, pinned key is {key_id}")
+    try:
+        signature = bytes.fromhex(signature_hex)
+    except ValueError:
+        return False, SIGNATURE_MALFORMED, "signature is not valid hex"
+    if len(signature) != 64:
+        return False, SIGNATURE_MALFORMED, f"signature is {len(signature)} bytes; 64 required"
+
+    cache_key = (purpose, key_id, payload, signature)
+    cached = _VERIFY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        message = signed_message(purpose, payload, key_id)
+    except OwnerAuthorityError as exc:
+        return False, SIGNATURE_MALFORMED, str(exc)
+
+    valid = ed25519.verify(message, signature, raw)
+    result = ((True, SIGNATURE_VALID, "owner signature verified") if valid else
+              (False, SIGNATURE_INVALID, "owner signature does not match the artifact contents"))
+    if len(_VERIFY_CACHE) < 4096:
+        _VERIFY_CACHE[cache_key] = result
+    return result

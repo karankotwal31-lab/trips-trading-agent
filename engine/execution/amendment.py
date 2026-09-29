@@ -43,12 +43,17 @@ from .gate import (
     LIVE_AUTHORIZATION_RULE_IDS,
     FrozenLiveBoundary,
     frozen_config_guard_permits,
+    frozen_config_guard_permitted_modes,
     frozen_config_mode,
     frozen_constitution_rule_ids,
+    frozen_modes,
     frozen_permitted_modes,
+    frozen_risk_permits,
+    frozen_risk_permitted_modes,
     verify_frozen_core_digest,
 )
-from .owner_authority import OwnerAuthorityError, owner_authority_status, verify_owner_signature
+from .owner_authority import (OwnerAuthorityError, PURPOSE_AMENDMENT, owner_authority_status,
+                             verify_owner_signature)
 from . import owner_authority
 
 #: Rules this amendment mechanism is permitted to touch. Nothing else may be added or removed.
@@ -59,6 +64,7 @@ AMENDABLE_REMOVE_RULES: Tuple[str, ...] = FROZEN_PROHIBITION_RULE_IDS
 AMENDMENT_ARTIFACTS: Tuple[str, ...] = (
     "engine/constitution.py",
     "engine/config_guard.py",
+    "engine/risk.py",
     "infra/core_v06.sha256",
     "engine/approved_config.sha256",
     "engine/approved_build.json",
@@ -68,6 +74,9 @@ AMENDMENT_ARTIFACTS: Tuple[str, ...] = (
 #: Verdict codes. The owner-signature codes come from the trust root so the two cannot drift.
 OWNER_SIGNATURE_REQUIRED = owner_authority.SIGNATURE_REQUIRED
 OWNER_AUTHORITY_KEY_NOT_CONFIGURED = owner_authority.KEY_NOT_CONFIGURED
+OWNER_AUTHORITY_KEY_MALFORMED = owner_authority.KEY_MALFORMED
+OWNER_AUTHORITY_KEY_MISMATCH = owner_authority.KEY_MISMATCH
+OWNER_SIGNATURE_MALFORMED = owner_authority.SIGNATURE_MALFORMED
 OWNER_SIGNATURE_INVALID = owner_authority.SIGNATURE_INVALID
 OWNER_SIGNATURE_VALID = owner_authority.SIGNATURE_VALID
 AMENDMENT_EXPIRED = "AMENDMENT_EXPIRED"
@@ -141,7 +150,7 @@ class AmendmentProposal:
 
     def claim_owner_signed(self) -> bool:
         """Whether this proposal carries a signature that verifies against the owner key."""
-        return verify_owner_signature(self.signed_payload(), self.signature)[0]
+        return verify_owner_signature(PURPOSE_AMENDMENT, self.signed_payload(), self.signature)[0]
 
     def content_hash(self) -> str:
         return hashlib.sha256(self.signed_payload()).hexdigest()
@@ -166,20 +175,25 @@ class CoreStateBasis:
     mode: str
     rule_ids: Tuple[str, ...]
     permitted_modes: Tuple[str, ...] = ()
+    risk_permitted_modes: Tuple[str, ...] = ()
     source: str = "FROZEN_FILES"
     amendment_id: Optional[str] = None
     amendment_hash: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"mode": self.mode, "rule_ids": list(self.rule_ids),
-                "permitted_modes": list(self.permitted_modes), "source": self.source,
+                "permitted_modes": list(self.permitted_modes),
+                "risk_permitted_modes": list(self.risk_permitted_modes),
+                "source": self.source,
                 "amendment_id": self.amendment_id, "amendment_hash": self.amendment_hash}
 
 
 def frozen_core_basis() -> CoreStateBasis:
     """Read the live basis straight from the frozen core. No overrides are possible here."""
     return CoreStateBasis(mode=frozen_config_mode(), rule_ids=frozen_constitution_rule_ids(),
-                          permitted_modes=frozen_permitted_modes(), source="FROZEN_FILES")
+                          permitted_modes=frozen_permitted_modes(),
+                          risk_permitted_modes=frozen_risk_permitted_modes(),
+                          source="FROZEN_FILES")
 
 
 def blockers_to_live_release(*, boundary: Optional[FrozenLiveBoundary] = None,
@@ -193,7 +207,8 @@ def blockers_to_live_release(*, boundary: Optional[FrozenLiveBoundary] = None,
     boundary = boundary or FrozenLiveBoundary()
     basis = frozen_core_basis()
     verdict = boundary.evaluate(mode=target_mode, rule_ids=basis.rule_ids,
-                                permitted_modes=basis.permitted_modes)
+                                permitted_modes=basis.permitted_modes,
+                                risk_permitted_modes=frozen_risk_permitted_modes())
     return {"target_mode": target_mode, "blockers": verdict.blockers(),
             "reasons": list(verdict.reasons), "boundary": verdict.to_dict()}
 
@@ -207,6 +222,7 @@ def live_release_requirements(*, boundary: Optional[FrozenLiveBoundary] = None) 
     live = blockers_to_live_release(boundary=boundary)
     digest = verify_frozen_core_digest()
     guard = frozen_config_guard_permits("live")
+    risk = frozen_risk_permits("live")
     return {
         "released": verdict.released,
         "code": verdict.code,
@@ -218,6 +234,9 @@ def live_release_requirements(*, boundary: Optional[FrozenLiveBoundary] = None) 
         "current_mode": basis.mode,
         "current_rule_count": len(basis.rule_ids),
         "frozen_config_guard_permitted_modes": list(basis.permitted_modes),
+        "frozen_risk_permitted_modes": list(basis.risk_permitted_modes),
+        "frozen_mode_restrictions": {name: list(modes)
+                                     for name, modes in frozen_modes().items()},
         "owner_authority": owner_authority_status(),
         "prohibition_rule_present": sorted(set(FROZEN_PROHIBITION_RULE_IDS) & set(basis.rule_ids)),
         "authorization_rule_present": sorted(set(LIVE_AUTHORIZATION_RULE_IDS) & set(basis.rule_ids)),
@@ -228,10 +247,16 @@ def live_release_requirements(*, boundary: Optional[FrozenLiveBoundary] = None) 
             "config_guard_probe": {
                 "mode": "live", "permitted_by_frozen_core": bool(guard.get("permitted")),
                 "reason": guard.get("reason"),
-                "detail": ("The frozen config_guard refuses every mode other than paper, so the "
-                           "PAPER_FIRST rule is NOT the only frozen blocker. Both the Constitution "
-                           "rule and the config_guard mode restriction must be amended together."),
             },
+            "risk_engine_probe": {
+                "mode": "live", "permitted_by_frozen_core": bool(risk.get("permitted")),
+                "reason": risk.get("reason"),
+            },
+            "detail": ("PAPER_FIRST is NOT the only frozen blocker, and there are THREE. The frozen "
+                       "config_guard refuses every mode other than paper, and the frozen Risk "
+                       "engine's forge_gate carries its own paper_mode check that does the same. "
+                       "All three sites must be amended together, or the system reports every "
+                       "precondition satisfied while its own risk gate still vetoes live mode."),
         },
         "artifacts_requiring_owner_review_and_reapproval": list(AMENDMENT_ARTIFACTS),
         "note": ("The amendment mechanism is implemented and tested. It refuses to self-apply: "
@@ -269,7 +294,7 @@ def verify_amendment(proposal: AmendmentProposal, *, current_rule_ids: Optional[
                 "current_rule_count": len(current)}
 
     signed_ok, signed_code, signed_detail = verify_owner_signature(
-        proposal.signed_payload(), proposal.signature)
+        PURPOSE_AMENDMENT, proposal.signed_payload(), proposal.signature)
     if not signed_ok:
         return refuse(signed_code,
                       f"{signed_detail}; only the owner may amend the Constitution")
@@ -297,18 +322,27 @@ def verify_amendment(proposal: AmendmentProposal, *, current_rule_ids: Optional[
         return refuse(AMENDMENT_REMOVES_PROTECTED_RULE,
                       f"amendment would drop protected rules {protected}")
 
-    # The amendment also amends the frozen config_guard, so the post-amendment mode set is the
-    # frozen one plus the proposed target mode. This models the SECOND frozen blocker: the
-    # Constitution rule alone would not have been enough.
+    # The amendment also amends the frozen config_guard AND the frozen Risk engine's paper_mode
+    # check, so each post-amendment mode set is its frozen one plus the proposed target mode.
+    # This models the SECOND and THIRD frozen blockers: the Constitution rule alone would not
+    # have been enough, and neither would the rule plus config_guard alone.
+    restrictions = frozen_modes()
     current_modes = frozen_permitted_modes()
     if proposal.target_mode in current_modes:
         return refuse(AMENDMENT_DOES_NOT_OPEN_THE_GATE,
-                      f"the frozen config_guard already permits mode {proposal.target_mode!r}, "
+                      f"the frozen core already permits mode {proposal.target_mode!r}, "
                       "so this amendment does not change the mode restriction")
     permitted_modes = tuple(current_modes) + (proposal.target_mode,)
+    guard_after = (tuple(restrictions["config_guard"]) + (proposal.target_mode,)
+                   if proposal.target_mode not in restrictions["config_guard"]
+                   else tuple(restrictions["config_guard"]))
+    risk_after = (tuple(restrictions["risk"]) + (proposal.target_mode,)
+                  if proposal.target_mode not in restrictions["risk"]
+                  else tuple(restrictions["risk"]))
 
     verdict = boundary.evaluate(mode=proposal.target_mode, rule_ids=rule_ids,
-                                permitted_modes=permitted_modes)
+                                permitted_modes=permitted_modes,
+                                risk_permitted_modes=risk_after)
     if not verdict.released:
         return {"applicable": False, "code": AMENDMENT_DOES_NOT_OPEN_THE_GATE,
                 "reasons": list(verdict.reasons), "proposal_hash": proposal.content_hash(),
@@ -317,7 +351,8 @@ def verify_amendment(proposal: AmendmentProposal, *, current_rule_ids: Optional[
                 "note": "the production boundary still refuses under the amended facts"}
 
     basis = CoreStateBasis(mode=proposal.target_mode, rule_ids=rule_ids,
-                           permitted_modes=permitted_modes, source="VERIFIED_AMENDMENT",
+                           permitted_modes=permitted_modes,
+                           risk_permitted_modes=risk_after, source="VERIFIED_AMENDMENT",
                            amendment_id=proposal.amendment_id,
                            amendment_hash=proposal.content_hash())
     return {
@@ -332,6 +367,7 @@ def verify_amendment(proposal: AmendmentProposal, *, current_rule_ids: Optional[
         "amended_rule_count": len(rule_ids),
         "preserved_rule_count": len([r for r in current if r not in set(proposal.removes_rules)]),
         "permitted_modes": list(permitted_modes),
+        "risk_permitted_modes": list(risk_after),
         "blockers_resolved": blockers_to_live_release(boundary=boundary)["blockers"],
         "blockers_after_amendment": verdict.blockers(),
         "boundary_code": verdict.code,
@@ -352,6 +388,7 @@ def release_basis_from_verdict(verdict: Mapping[str, Any]) -> CoreStateBasis:
     basis = dict(verdict.get("release_basis") or {})
     return CoreStateBasis(mode=str(basis["mode"]), rule_ids=tuple(basis["rule_ids"]),
                           permitted_modes=tuple(basis.get("permitted_modes") or ()),
+                          risk_permitted_modes=tuple(basis.get("risk_permitted_modes") or ()),
                           source=str(basis.get("source", "VERIFIED_AMENDMENT")),
                           amendment_id=basis.get("amendment_id"),
                           amendment_hash=basis.get("amendment_hash"))

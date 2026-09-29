@@ -7,7 +7,7 @@
     "docs/styles.css": "7350648528dfad4baf20a04bd996eb0e4d04030d0ba33b79a04febdf27c21b82",
     "engine/ack_escalation.py": "d0eab96744e5fb5c4d4a010fe5aefba0bfefc3c767728d815cf4c9e276f941c8",
     "engine/backtest.py": "b8c0571f191281246254a0f68a807316bc58931710171a512130cd19250f37b1",
-    "engine/build_guard.py": "e5da3d52ba287b276bedab0f7c7120400b91454cc7fdc95e0b527fe8a6b1b3a8",
+    "engine/build_guard.py": "e5a9b03974d52afb24f0c8be69f77ee9bf81d3f7b787a479f13ed496840744e7",
     "engine/candle_intelligence.py": "8ab0fbcf12e6fb699827bef77ade95b150274787f8c3024472de994edc998259",
     "engine/capability_registry.json": "1ee873a22df78bda77061ef412da240173cd11b26ec0636677d9120fd374ac62",
     "engine/chaos_diagnostics.py": "765f45e33a9570416c6208c7b921411a6cf7ec6b42a0bfb3c5a71866e60614b9",
@@ -26,6 +26,7 @@
     "engine/market_time.py": "d37bd2d3c5a424309325f0c02ef12b34a9af4b2505876c772b5a0765737ce117",
     "engine/migrate_runtime_v04_to_v05.py": "9fccbf8158bc54d89416276b74af406cb4c9e54318e8199c3cae0728124b4c06",
     "engine/migrate_runtime_v05_to_v06.py": "e083817f15289e1a4b968679bbd7e97026c06942e65f51f3bd553b61e4b60f3f",
+    "engine/owner_public_key.json": "07000b4fd4a52ed79806791ebbe1b12bfea99e3a1f439a113cd52b1e2b89d3ec",
     "engine/providers.py": "4f639664f3365109d33202117ad5b7b4fe3958e78395371c3d882d2e86f349b7",
     "engine/redaction.py": "3e15aed39dbd14064104742411c8db8e2a56d8c2a6e4eeb2f6d5cf595064aa2d",
     "engine/risk.py": "e2158ce41c2be220713cb4517fd0619b388474cad6508ebc02ec2e93f8362036",
@@ -37,6 +38,6 @@
     "engine/supervisor_relay.py": "d38b065edbbe858aaa26ea789bda5b01209991fb8d059760994ae1faeb2e6202",
     "engine/truth_guard.py": "418d84a6707c5eb0f13920764ed49815323527e8d3c7dd9668c255de92a0bd2e"
   },
-  "manifest_hash": "d67a692a877a02c0a1211f98e554b37cd52bb48c65a1e03b85952aef5a244ee0",
+  "manifest_hash": "28edab6a232f7e75c6488c8c970f1ca408690daf69598cd229ca0bd658d967a9",
   "schema_version": 2
 }

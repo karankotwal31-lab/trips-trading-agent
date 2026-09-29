@@ -1,0 +1,7 @@
+{
+  "algorithm": "ed25519",
+  "configured": false,
+  "key_id": "",
+  "note": "Owner Ed25519 public verification key. Public material, not a secret. This file is pinned in build_guard.CRITICAL_FILES, so substituting it trips EXECUTABLE_BUILD_LOCK. The owner's private key never enters this repository, this process, or any environment variable; signatures are produced offline by scripts/sign_owner_artifact.py. Until the owner installs a key here every owner act fails closed with OWNER_AUTHORITY_KEY_NOT_CONFIGURED, so no amendment can verify and no live authorization can be valid.",
+  "public_key": ""
+}

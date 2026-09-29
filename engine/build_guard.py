@@ -41,6 +41,9 @@ CRITICAL_FILES = (
     "dashboard_export.py",
     "dashboard_server.py",
     "capability_registry.json",
+    # The owner public verification key. Public material, but substituting it would let anyone
+    # forge an owner act, so it is as integrity-critical as the Constitution itself.
+    "owner_public_key.json",
 )
 
 # Operator-visible truth claims are part of the reviewed trust surface even though they have

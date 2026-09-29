@@ -11,16 +11,19 @@ LIVE_LOCKED and cannot leave it while the frozen Constitution forbids live-money
 from __future__ import annotations
 
 import hashlib
+import importlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .amendment import CoreStateBasis, frozen_core_basis  # noqa: E402
 from .contracts import ExecutionLayerError, canonical_json
 from .gate import (FrozenLiveBoundary, LiveBoundaryVerdict, frozen_config_mode,
-                   frozen_constitution_rule_ids, frozen_permitted_modes)
-from .owner_authority import owner_authority_status, verify_owner_signature  # noqa: E402
+                   frozen_constitution_rule_ids, frozen_permitted_modes,
+                   frozen_risk_permitted_modes, verify_frozen_core_digest)
+from .owner_authority import (PURPOSE_LIVE_AUTHORIZATION, owner_authority_status,  # noqa: E402
+                             verify_owner_signature)
 from typing import Mapping  # noqa: E402
 
 LIVE_LOCKED_REFUSAL = "LIVE_LOCKED_REFUSAL"
@@ -34,6 +37,10 @@ class Stage(str, Enum):
     SHADOW = "SHADOW"
     PAPER = "PAPER"
     LIVE_LOCKED = "LIVE_LOCKED"
+    #: Everything an autonomous process can complete is done. Still locked: the remaining
+    #: blockers are owner credentials, owner capital values, or the owner's signature, and no
+    #: component may supply any of them. This is the ceiling autonomous work may reach.
+    LIVE_READY_LOCKED = "LIVE_READY_LOCKED"
     LIVE_ENABLED = "LIVE_ENABLED"
 
 
@@ -53,9 +60,28 @@ ALLOWED_TRANSITIONS: Dict[Stage, Tuple[Stage, ...]] = {
     Stage.BACKTEST: (Stage.SHADOW,),
     Stage.SHADOW: (Stage.PAPER,),
     Stage.PAPER: (Stage.LIVE_LOCKED,),
-    Stage.LIVE_LOCKED: (Stage.LIVE_ENABLED,),
-    Stage.LIVE_ENABLED: (Stage.LIVE_LOCKED,),
+    Stage.LIVE_LOCKED: (Stage.LIVE_READY_LOCKED,),
+    Stage.LIVE_READY_LOCKED: (Stage.LIVE_ENABLED, Stage.LIVE_LOCKED),
+    Stage.LIVE_ENABLED: (Stage.LIVE_READY_LOCKED,),
 }
+
+#: Items that CANNOT be completed by any autonomous component, because each is an owner
+#: credential, an owner capital value, or the owner's signature. Reaching LIVE_READY_LOCKED means
+#: every remaining blocker is on this list and nothing else.
+OWNER_BLOCKING_ITEMS: Tuple[Tuple[str, str], ...] = (
+    ("owner_public_key_configured", "the owner must install their Ed25519 public key; "
+                                    "no owner act is possible without it"),
+    ("capital_governor_profile_set", "maximum capital, loss, exposure and position values are an "
+                                     "owner input; none has been invented"),
+    ("broker_channel_and_conformance", "an authorized programmable broker interface plus owner "
+                                       "credentials, then a recorded conformance run"),
+    ("production_market_data", "real market-data credentials and entitlement evidence; provider "
+                               "mode is still DEMO"),
+    ("owner_signed_live_authorization", "decision A (amendment) and decision B (live "
+                                        "authorization), separately and explicitly signed"),
+    ("constitutional_amendment_applied", "re-freezing the frozen core is an owner act through the "
+                                         "approved change process"),
+)
 
 # Stage the additive execution layer ships in: fully built, verified, holding at the lock.
 DEFAULT_STAGE = Stage.LIVE_LOCKED
@@ -93,7 +119,8 @@ class LiveAuthorization:
 
     def signature_valid(self) -> Tuple[bool, str, str]:
         """Verify this artifact against the owner key. Returns (ok, code, detail)."""
-        return verify_owner_signature(self.signed_payload(), self.signature)
+        return verify_owner_signature(PURPOSE_LIVE_AUTHORIZATION, self.signed_payload(),
+                                      self.signature)
 
     def _aware(self, value: str, name: str) -> datetime:
         try:
@@ -202,21 +229,97 @@ class Lifecycle:
         return CoreStateBasis(
             mode=mode if mode is not None else frozen_config_mode(),
             rule_ids=tuple(rule_ids) if rule_ids is not None else frozen_constitution_rule_ids(),
-            permitted_modes=frozen_permitted_modes(), source="CALLER_ASSERTED")
+            permitted_modes=frozen_permitted_modes(),
+            risk_permitted_modes=frozen_risk_permitted_modes(), source="CALLER_ASSERTED")
+
+    def live_readiness(self) -> Dict[str, Any]:
+        """What still stands between this build and live capital, classified by who can clear it.
+
+        An ENGINEERING item is anything a component can finish by itself. An OWNER item is a
+        credential, a capital value, or a signature. This method never reports an owner item as
+        satisfied, and reaching ``LIVE_READY_LOCKED`` grants nothing: that stage is still locked.
+        """
+        checks: List[Dict[str, Any]] = []
+
+        def add(name: str, passed: bool, detail: str) -> None:
+            checks.append({"name": name, "passed": bool(passed), "detail": detail})
+
+        digest = verify_frozen_core_digest()
+        add("frozen_core_digest_verified", bool(digest.get("verified")),
+            f"infra/core_v06.sha256 against engine/constitution.py ({digest.get('live', 'n/a')[:12]})")
+
+        try:
+            from build_guard import verify_build_integrity
+
+            build = verify_build_integrity()
+            add("executable_build_integrity", True,
+                f"manifest {build.get('manifest_hash', '')[:12]}")
+        except Exception as exc:
+            add("executable_build_integrity", False, f"{type(exc).__name__}: {exc}")
+
+        try:
+            from .exchange_calendar import default_us_equity_calendar
+
+            calendar = default_us_equity_calendar()
+            add("session_calendar_available", bool(calendar.provenance),
+                "computed US equity exchange calendar; session truth no longer waits on an owner")
+        except Exception as exc:
+            add("session_calendar_available", False, f"{type(exc).__name__}: {exc}")
+
+        for name, module_name in (("broker_adapters_present", "adapters"),
+                                  ("reconciliation_engine_present", "reconciliation"),
+                                  ("supervisor_provider_present", "supervisor"),
+                                  ("owner_trust_root_present", "owner_authority"),
+                                  ("execution_authority_gate_present", "gate")):
+            try:
+                importlib.import_module(f"execution.{module_name}")
+                add(name, True, f"engine/execution/{module_name}.py")
+            except Exception as exc:
+                add(name, False, f"{type(exc).__name__}: {exc}")
+
+        engineering_ready = all(check["passed"] for check in checks)
+        return {
+            "stage": self._stage.value,
+            "engineering_ready": engineering_ready,
+            "engineering_checks": checks,
+            "failing_engineering": [c["name"] for c in checks if not c["passed"]],
+            "owner_blocking_items": [{"name": name, "requirement": requirement}
+                                     for name, requirement in OWNER_BLOCKING_ITEMS],
+            "ceiling": Stage.LIVE_READY_LOCKED.value,
+            "note": ("LIVE_READY_LOCKED means every remaining blocker is an owner credential, an "
+                     "owner capital value, or the owner's signature. It grants nothing: capital "
+                     "release still requires a separately signed live authorization."),
+        }
 
     def advance(self, to: Stage, *, actor: Actor, authorization: Optional[LiveAuthorization] = None,
                 mode: Optional[str] = None, rule_ids: Optional[Sequence[str]] = None,
                 now: datetime | None = None, config: Optional[Mapping[str, Any]] = None,
                 governor_profile_hash: Optional[str] = None) -> Dict[str, Any]:
-        """Promote only on explicit owner authority. Every other actor is refused."""
+        """Promote only on explicit owner authority, except into the locked readiness stage.
+
+        ``LIVE_READY_LOCKED`` is reachable by any actor once the engineering checks pass, because
+        it asserts completeness and grants nothing. ``LIVE_ENABLED`` remains owner-only.
+        """
         to = Stage(to)
-        if actor is not Actor.OWNER:
-            return {"advanced": False, "code": "PROMOTION_REFUSED_NOT_OWNER", "stage": self._stage.value,
-                    "reason": f"{actor.value} is not a promotion authority"}
         if to not in ALLOWED_TRANSITIONS.get(self._stage, ()):
             return {"advanced": False, "code": "PROMOTION_REFUSED_ILLEGAL_TRANSITION",
                     "stage": self._stage.value,
                     "reason": f"{self._stage.value} -> {to.value} is not a permitted transition"}
+        if actor is not Actor.OWNER:
+            if to is not Stage.LIVE_READY_LOCKED:
+                return {"advanced": False, "code": "PROMOTION_REFUSED_NOT_OWNER",
+                        "stage": self._stage.value,
+                        "reason": f"{actor.value} is not a promotion authority"}
+            readiness = self.live_readiness()
+            if not readiness["engineering_ready"]:
+                return {"advanced": False, "code": "LIVE_READY_REFUSED_ENGINEERING_INCOMPLETE",
+                        "stage": self._stage.value,
+                        "reason": "; ".join(readiness["failing_engineering"]),
+                        "readiness": readiness}
+            self._stage = to
+            return {"advanced": True, "code": "STAGE_ADVANCED", "stage": self._stage.value,
+                    "note": "still locked: no capital release is possible from this stage",
+                    "readiness": readiness}
 
         if to is Stage.LIVE_ENABLED:
             verdict = self.release_verdict(mode=mode, rule_ids=rule_ids)
@@ -253,7 +356,8 @@ class Lifecycle:
         """
         basis = self._basis(mode, rule_ids)
         return self._boundary.evaluate(mode=basis.mode, rule_ids=basis.rule_ids,
-                                       permitted_modes=basis.permitted_modes)
+                                       permitted_modes=basis.permitted_modes,
+                                       risk_permitted_modes=basis.risk_permitted_modes)
 
     def may_transmit_live(self, *, mode: Optional[str] = None,
                           rule_ids: Optional[Sequence[str]] = None) -> Dict[str, Any]:
@@ -265,7 +369,8 @@ class Lifecycle:
         """
         basis = self._basis(mode, rule_ids)
         verdict = self._boundary.evaluate(mode=basis.mode, rule_ids=basis.rule_ids,
-                                          permitted_modes=basis.permitted_modes)
+                                          permitted_modes=basis.permitted_modes,
+                                          risk_permitted_modes=basis.risk_permitted_modes)
         asserted = basis.source == "CALLER_ASSERTED"
         permitted = bool(verdict.released and self._stage is Stage.LIVE_ENABLED and not asserted)
         reasons = list(verdict.reasons)
