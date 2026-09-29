@@ -65,6 +65,9 @@ CRITICAL_PROJECT_FILES = (
     # The owner-side signer handles the private trust root. A modified copy could sign a different
     # artifact or mishandle key material, so the reviewed signer is part of executable integrity.
     "scripts/sign_owner_artifact.py",
+    # Production bootstrap can inspect real broker/data credentials. It is read-only by design,
+    # and pinning it prevents a modified operator tool from quietly widening its authority.
+    "scripts/live_bootstrap.py",
 )
 
 
