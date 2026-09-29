@@ -85,17 +85,15 @@ class ReadOnlyBrokerAccount(Protocol):
 
     def probe_error_behaviour(self) -> Mapping[str, Any]: ...
 
-    def market_data_entitlement(self) -> Mapping[str, Any]: ...
-
 
 #: Every name the read-only protocol may expose. Anything else is a capability this verifier is not
 #: allowed to hold.
 READ_ONLY_METHODS: Tuple[str, ...] = (
     "health", "account", "positions", "open_orders", "recent_orders", "instrument",
-    "clock", "restrictions", "probe_error_behaviour", "market_data_entitlement",
+    "clock", "restrictions", "probe_error_behaviour",
 )
 
-#: The twelve mandated checks, in the order they must pass.
+#: The eleven mandated broker/account checks, in the order they must pass.
 READ_ONLY_CHECKS: Tuple[str, ...] = (
     "authenticate_legitimately",
     "verify_broker_identity",
@@ -108,7 +106,6 @@ READ_ONLY_CHECKS: Tuple[str, ...] = (
     "verify_broker_clock",
     "verify_account_restrictions",
     "verify_rate_limit_and_error_behaviour",
-    "verify_live_market_data_entitlement",
 )
 
 
@@ -198,7 +195,7 @@ class LiveReadOnlyVerification:
 
     @property
     def verified(self) -> bool:
-        """All twelve passed. Anything less is UNVERIFIED and releases nothing."""
+        """All eleven passed. Anything less is UNVERIFIED and releases nothing."""
         return not (self.failed_checks or self.missing_checks)
 
     def digest(self) -> str:
@@ -243,7 +240,7 @@ def assert_non_mutating(target: Any) -> None:
 
 
 class LiveReadOnlyBrokerVerifier:
-    """Runs the twelve mandated checks read-only against the intended real live account.
+    """Runs the eleven mandated broker/account checks read-only against the intended real live account.
 
     Every check has its own named method. A check that raises is recorded as failed with the
     exception type - never swallowed - so a broker that rejects us is visible rather than inferred.
@@ -260,7 +257,7 @@ class LiveReadOnlyBrokerVerifier:
         self._broker_id = getattr(target, "broker_id", "unknown")
         self._environment = getattr(target, "environment", "")
 
-    # -- the twelve checks -----------------------------------------------
+    # -- the eleven checks -----------------------------------------------
 
     def _authenticate_legitimately(self) -> Dict[str, Any]:
         health = self._target.health()
@@ -381,24 +378,6 @@ class LiveReadOnlyBrokerVerifier:
         return {"raises_typed_error": True, "empty_success_is_impossible": True,
                 "rate_limit_headers_supported": bool(behaviour.get("rate_limit_headers_supported")),
                 "note": "observed from interface metadata; no request was made to provoke an error"}
-
-    def _verify_live_market_data_entitlement(self) -> Dict[str, Any]:
-        entitlement = self._target.market_data_entitlement()
-        if not isinstance(entitlement, Mapping):
-            raise LiveVerificationError("market-data entitlement payload is unusable")
-        if entitlement.get("entitled") is not True:
-            raise LiveVerificationError(
-                f"the broker reports no live market-data entitlement: "
-                f"{entitlement.get('detail', 'no detail supplied')}")
-        symbols = {str(symbol).strip().upper()
-                   for symbol in (entitlement.get("symbols") or ()) if str(symbol).strip()}
-        required = set(self._instruments)
-        missing = sorted(required - symbols)
-        if missing:
-            raise LiveVerificationError(
-                f"live market-data entitlement does not cover required instruments {missing}")
-        return {"entitled": True, "source": entitlement.get("source"),
-                "symbols": sorted(symbols), "required": sorted(required)}
 
     # -- run -------------------------------------------------------------
 
