@@ -6,7 +6,7 @@
   "safety_workflow_run_id": 36628689284,
   "live_readiness_workflow_run_id": 36628689313,
   "safety_workflow_conclusion": "success",
-  "live_readiness_workflow_status": "in_progress_at_record_creation",
+  "live_readiness_workflow_status": "success",
   "result": {
     "aggregate": {
       "aggregate_net_pnl": 10080.98,
@@ -645,5 +645,6 @@
       }
     ],
     "schema_version": 1
-  }
+  },
+  "record_finalized_at": "2026-09-30"
 }
