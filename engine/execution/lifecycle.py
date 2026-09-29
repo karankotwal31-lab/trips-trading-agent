@@ -558,6 +558,80 @@ class Lifecycle:
                      "satisfied by a broker execution feed."),
         }
 
+    def market_data_verification_status(self, *, now: datetime | None = None) -> Dict[str, Any]:
+        """Validate fresh independent production-data evidence without contacting a broker."""
+        from .market_data import (PRODUCTION_DATA_EVIDENCE_KIND, PRODUCTION_DATA_MAX_AGE_SECONDS,
+                                  REQUIRED_PRODUCTION_SYMBOLS, ProductionMarketDataVerification)
+
+        verification = self._market_data_verification
+        if verification is None:
+            return {
+                "evidence_kind": PRODUCTION_DATA_EVIDENCE_KIND,
+                "status": "NOT_VERIFIED", "verified": False,
+                "reasons": ["no independent production market-data verification is installed"],
+                "required_symbols": list(REQUIRED_PRODUCTION_SYMBOLS),
+                "releases_capital": False,
+                "max_age_seconds": PRODUCTION_DATA_MAX_AGE_SECONDS,
+            }
+        if not isinstance(verification, ProductionMarketDataVerification):
+            return {
+                "evidence_kind": PRODUCTION_DATA_EVIDENCE_KIND,
+                "status": "NOT_VERIFIED", "verified": False,
+                "reasons": ["production market-data evidence has the wrong type"],
+                "required_symbols": list(REQUIRED_PRODUCTION_SYMBOLS),
+                "releases_capital": False,
+                "max_age_seconds": PRODUCTION_DATA_MAX_AGE_SECONDS,
+            }
+
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        reasons: List[str] = []
+        try:
+            generated = datetime.fromisoformat(
+                str(verification.generated_at).replace("Z", "+00:00"))
+            if generated.tzinfo is None:
+                raise ValueError("generated_at is naive")
+            generated = generated.astimezone(timezone.utc)
+            age = (now - generated).total_seconds()
+            if age < -300:
+                reasons.append("production data verification timestamp is implausibly in the future")
+            elif age > PRODUCTION_DATA_MAX_AGE_SECONDS:
+                reasons.append(
+                    f"production data verification is stale ({age:.0f}s > "
+                    f"{PRODUCTION_DATA_MAX_AGE_SECONDS}s)")
+        except Exception:
+            reasons.append("production data verification generated_at is unusable")
+
+        if verification.evidence_kind != PRODUCTION_DATA_EVIDENCE_KIND:
+            reasons.append("production data evidence kind is invalid")
+        if verification.interval != "60min":
+            reasons.append(f"production data interval {verification.interval!r} is not '60min'")
+        if verification.primary_family == verification.secondary_family:
+            reasons.append("production data sources are not independent")
+        if verification.missing_symbols:
+            reasons.append(
+                f"production data evidence is missing symbols {list(verification.missing_symbols)}")
+        if verification.failed_symbols:
+            reasons.append(
+                f"production data evidence failed symbols {list(verification.failed_symbols)}")
+        if not verification.verified:
+            reasons.append("production data verification did not pass")
+
+        verified = not reasons
+        return {
+            "evidence_kind": PRODUCTION_DATA_EVIDENCE_KIND,
+            "status": "VERIFIED" if verified else "NOT_VERIFIED",
+            "verified": verified,
+            "primary_provider": verification.primary_provider,
+            "primary_family": verification.primary_family,
+            "secondary_provider": verification.secondary_provider,
+            "secondary_family": verification.secondary_family,
+            "interval": verification.interval,
+            "required_symbols": list(REQUIRED_PRODUCTION_SYMBOLS),
+            "reasons": reasons,
+            "releases_capital": False,
+            "max_age_seconds": PRODUCTION_DATA_MAX_AGE_SECONDS,
+        }
+
     def advance(self, to: Stage, *, actor: Actor, authorization: Optional[LiveAuthorization] = None,
                 mode: Optional[str] = None, rule_ids: Optional[Sequence[str]] = None,
                 now: datetime | None = None, config: Optional[Mapping[str, Any]] = None,
