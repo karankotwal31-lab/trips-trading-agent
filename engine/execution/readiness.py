@@ -53,6 +53,8 @@ ENGINEERING_CHECKS: Tuple[str, ...] = (
     "translation_round_trip_proven",
     "reconciliation_engine_exercised",
     "market_data_pipeline_exercised",
+    "dual_source_production_data_evidence_exercised",
+    "production_bootstrap_offline_exercised",
     "data_health_fails_closed",
     "session_calendar_exercised",
     "supervisor_bridge_exercised",
@@ -70,6 +72,8 @@ ENGINEERING_WORK_COVERAGE: Mapping[str, str] = {
         "reconciliation_engine_exercised",
     "RECORDED_CONTRACT_CONFORMANCE evidence for implementation behaviour":
         "per_capability_conformance_evidence",
+    "a non-mutating production bootstrap for broker/account verification":
+        "production_bootstrap_offline_exercised",
     "a production market-data provider implementation": "market_data_pipeline_exercised",
     "integration with the frozen Truth Engine": "market_data_pipeline_exercised",
     "a data-provenance guard separating market data from broker execution feeds":
@@ -78,6 +82,8 @@ ENGINEERING_WORK_COVERAGE: Mapping[str, str] = {
         "market_data_pipeline_exercised",
     "exchange-calendar and session integration": "session_calendar_exercised",
     "fail-closed data-health logic": "data_health_fails_closed",
+    "independent dual-source production market-data verification":
+        "dual_source_production_data_evidence_exercised",
 }
 
 
