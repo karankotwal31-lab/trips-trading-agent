@@ -14,7 +14,8 @@ diff --git a/engine/execution/ed25519.py b/engine/execution/ed25519.py
 diff --git a/tests/test_live_readiness.py b/tests/test_live_readiness.py
 --- a/tests/test_live_readiness.py
 +++ b/tests/test_live_readiness.py
-@@ -68,6 +68,15 @@ def test_ed25519_matches_the_published_rfc8032_vector_two():
+@@ -68,6 +68,15 @@
+ def test_ed25519_matches_the_published_rfc8032_vector_two():
      private, _ = ed25519.generate_keypair(RFC8032_V2_SEED)
      assert ed25519.sign(b"\\x72", private).hex().startswith(RFC8032_V2_SIGNATURE_PREFIX)
  
@@ -29,5 +30,3 @@ diff --git a/tests/test_live_readiness.py b/tests/test_live_readiness.py
 +
 +
  def test_ed25519_rejects_tampering_and_malformed_input():
-     private, public = ed25519.generate_keypair(RFC8032_V1_SEED)
-     signature = ed25519.sign(b"message", private)
