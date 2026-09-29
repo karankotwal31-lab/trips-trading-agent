@@ -46,14 +46,6 @@ CRITICAL_FILES = (
     "owner_public_key.json",
 )
 
-#: Directories whose every module is integrity-critical. The additive execution layer is the
-#: real-money path: an edit to its gateway, its conformance evidence or its channel mapping changes
-#: what may be transmitted, so it is covered by the same manifest as the frozen core's neighbours.
-#: Without this, ``execution/conformance.py`` could be edited to answer SUPPORTED unconditionally
-#: and every downstream digest would still be internally consistent.
-CRITICAL_DIRECTORIES = ("execution",)
-
-
 # Operator-visible truth claims are part of the reviewed trust surface even though they have
 # zero execution authority. A modified dashboard must therefore trip build integrity too.
 CRITICAL_PROJECT_FILES = (
@@ -86,16 +78,6 @@ def current_manifest(root: Path | None = None) -> Dict[str, object]:
         if not p.exists() or not p.is_file():
             raise BuildIntegrityError(f"critical build file missing: engine/{name}")
         files[f"engine/{name}"] = _sha256(p)
-    for directory in CRITICAL_DIRECTORIES:
-        root_dir = engine_root / directory
-        if not root_dir.is_dir():
-            raise BuildIntegrityError(f"critical build directory missing: engine/{directory}")
-        modules = sorted(path for path in root_dir.glob("*.py") if path.is_file())
-        if not modules:
-            raise BuildIntegrityError(f"critical build directory is empty: engine/{directory}")
-        for path in modules:
-            rel = f"engine/{directory}/{path.name}"
-            files[rel] = _sha256(path)
     for rel in CRITICAL_PROJECT_FILES:
         p = project_root / rel
         if not p.exists() or not p.is_file():

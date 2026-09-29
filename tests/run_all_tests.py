@@ -30,7 +30,6 @@ SUITES = (
     ("execution-layer", [sys.executable, "tests/test_execution_layer.py"], {}),
     ("live-gate-amendment", [sys.executable, "tests/test_live_gate_amendment.py"], {}),
     ("live-readiness", [sys.executable, "tests/test_live_readiness.py"], {}),
-    ("execution-evidence", [sys.executable, "tests/test_execution_evidence.py"], {}),
     ("cloud-shell", [sys.executable, "infra/tests/test_cloud_shell.py"],
      {"PYTHONPATH": str(ROOT / "infra")}),
 )

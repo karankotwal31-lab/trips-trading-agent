@@ -12,12 +12,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-#: The order vocabulary is owned by ``contracts`` so the canonical economic representation and the
-#: intent itself can never drift apart. Re-exported here because callers import it from the intent.
-from .contracts import (ORDER_TYPES, SIDES, TIME_IN_FORCE, IntentError,  # noqa: F401
-                        IntentExpired, canonical_json)
+from .contracts import IntentError, IntentExpired, canonical_json
 
-__all__ = ["ORDER_TYPES", "SIDES", "TIME_IN_FORCE", "ExecutionIntent"]
+SIDES = ("BUY", "SELL")
+ORDER_TYPES = ("LIMIT", "MARKET")
+TIME_IN_FORCE = ("DAY", "GTC")
 
 
 def _aware(value: str, field: str) -> datetime:

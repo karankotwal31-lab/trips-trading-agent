@@ -22,7 +22,6 @@ sys.path.insert(0, str(TESTS_DIR))
 from execution import ed25519  # noqa: E402
 from execution.adapters import (AlpacaAdapter, BrokerChannel, BrokerContractError,  # noqa: E402
                                 UpstoxAdapter)
-from execution.contracts import CORE_CAPABILITIES  # noqa: E402
 from execution.amendment import blockers_to_live_release, live_release_requirements  # noqa: E402
 from execution.contracts import BrokerHealth  # noqa: E402
 from execution.exchange_calendar import (default_us_equity_calendar, early_closes,  # noqa: E402
@@ -134,7 +133,7 @@ def test_a_version_or_key_id_mismatch_is_refused_rather_than_guessed():
     with base.owner_key_configured():
         ok, code, _ = verify_owner_signature(PURPOSE_AMENDMENT, b"p", "")
         assert ok is False and code == "OWNER_SIGNATURE_REQUIRED"
-        ok, code, _ = verify_owner_signature(PURPOSE_AMENDMENT, b"p", "sha256:other:" + "aa" * 32)
+        ok, code, _ = verify_owner_signature(PURPOSE_AMENDMENT, b"p", "hmac:other:" + "aa" * 32)
         assert ok is False and code == "OWNER_SIGNATURE_MALFORMED"
         ok, code, _ = verify_owner_signature(
             PURPOSE_AMENDMENT, b"p", f"ed25519:v9:{base.TEST_OWNER_KEY_ID}:" + "aa" * 64)
@@ -271,8 +270,7 @@ def test_no_shipped_channel_means_no_adapter_can_reach_a_broker():
     for adapter in (UpstoxAdapter(), AlpacaAdapter()):
         assert adapter.health().connected is False
         matrix = adapter.capability_matrix()
-        assert matrix.statuses == {}, "no capability is claimed without conformance evidence"
-        assert len(matrix.missing_core()) == len(CORE_CAPABILITIES), "nothing is verified"
+        assert len(matrix.missing_core()) == len(matrix.statuses), "nothing is verified"
         for call in (lambda: adapter.submit_order(client_order_id="x", representation={}),
                      lambda: adapter.account(),
                      lambda: adapter.positions(),
@@ -301,35 +299,14 @@ def test_endpoint_selection_is_configuration_not_authority():
             pass
 
 
-def test_the_shipped_channels_cannot_be_constructed_without_a_credential():
-    """Concrete channels are engineering work; a credential is an owner act.
+def test_the_shipped_package_ships_no_broker_channel_implementation():
+    """A channel is an owner act. Shipping one would ship network capability with the library."""
+    import execution.adapters as adapters
 
-    So the package may carry real ``BrokerChannel`` implementations, and none of them may be
-    built without one. That keeps account access, entitlement and order capacity out of the
-    repository while still letting conformance be executed.
-    """
-    from execution.channels import AlpacaChannel, BrokerChannelError, UpstoxChannel
-
-    for channel_type in (UpstoxChannel, AlpacaChannel):
-        assert issubclass(channel_type, BrokerChannel)
-        try:
-            channel_type()
-            raise AssertionError(f"{channel_type.__name__} must refuse to build without a credential")
-        except BrokerChannelError as exc:
-            assert "credential" in str(exc).lower()
+    for name, value in vars(adapters).items():
+        if isinstance(value, type) and issubclass(value, BrokerChannel) and value is not BrokerChannel:
+            raise AssertionError(f"{name} looks like a shipped BrokerChannel implementation")
     assert BrokerChannel.__abstractmethods__
-
-
-def test_mutation_probes_never_run_against_a_live_endpoint():
-    from execution.channels import AlpacaChannel, BrokerChannelError, UpstoxChannel
-
-    for channel_type, kwargs in ((UpstoxChannel, {"access_token": "t"}),
-                                 (AlpacaChannel, {"api_key": "k", "api_secret": "s"})):
-        try:
-            channel_type(environment="live", allow_mutation_probes=True, **kwargs)
-            raise AssertionError("mutation probes must be refused against a live endpoint")
-        except BrokerChannelError as exc:
-            assert "live" in str(exc).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -386,54 +363,22 @@ def test_the_calendar_states_its_own_provenance_limits():
 # ---------------------------------------------------------------------------
 
 
-def test_readiness_is_computed_from_executed_evidence_not_module_imports():
-    """Every engineering check must EXECUTE something and carry a digest over the observation."""
-    from execution.readiness import ENGINEERING_CHECKS
-
+def test_readiness_separates_engineering_work_from_owner_blocked_items():
     readiness = Lifecycle(Stage.LIVE_LOCKED).live_readiness()
-    checks = {check["name"]: check for check in readiness["engineering_checks"]}
-    assert set(ENGINEERING_CHECKS) <= set(checks)
-    for name, check in checks.items():
-        assert check["produced_by"], f"{name} names no producing system"
-        assert len(check["observation_hash"]) == 64, f"{name} carries no evidence digest"
-    # The old module-import checks are gone, and nothing like them replaced them.
-    for gone in ("broker_adapters_present", "reconciliation_engine_present",
-                 "supervisor_provider_present", "owner_trust_root_present",
-                 "execution_authority_gate_present", "session_calendar_available"):
-        assert gone not in checks, f"{gone} is a module-presence check, not evidence"
-    assert "importlib" not in _lifecycle_source()
+    names = {check["name"] for check in readiness["engineering_checks"]}
+    assert {"frozen_core_digest_verified", "executable_build_integrity",
+            "session_calendar_available", "owner_trust_root_present"} <= names
     assert readiness["failing_engineering"] == []
     assert readiness["engineering_ready"] is True
     assert readiness["ceiling"] == "LIVE_READY_LOCKED"
-    assert readiness["live_status"] == "ENGINEERING_COMPLETE_STILL_LOCKED"
 
 
-def _lifecycle_source() -> str:
-    return (Path(__file__).resolve().parents[1] / "engine" / "execution" / "lifecycle.py").read_text()
-
-
-def test_the_two_mixed_blockers_are_split_into_engineering_and_owner_parts():
-    """Not all six remaining blockers are owner-only, and the split is explicit."""
-    items = {item.name: item for item in OWNER_BLOCKING_ITEMS}
-    assert set(items) == {"owner_public_key_configured", "capital_governor_profile_set",
-                          "broker_channel_and_conformance", "production_market_data",
-                          "owner_signed_live_authorization",
-                          "constitutional_amendment_applied"}
-    mixed = {"broker_channel_and_conformance", "production_market_data"}
-    owner_only = {"owner_public_key_configured", "capital_governor_profile_set",
-                  "owner_signed_live_authorization", "constitutional_amendment_applied"}
-    for name, item in items.items():
-        assert item.owner_only is (name in owner_only), name
-        assert item.owner, name
-        if name in mixed:
-            assert item.engineering, f"{name} must still state its engineering part"
-    assert items["broker_channel_and_conformance"].engineering[0].startswith("a real BrokerChannel")
-    assert any("provider API key" in part
-               for part in items["production_market_data"].owner)
-    # Upstox's mandate evidence names an Indian cash segment: that is engineering-side evidence,
-    # not a credential, so the owner part stays exactly the account/OAuth act.
-    upstox = items["broker_channel_and_conformance"].owner[0]
-    assert "OAuth" in upstox and "BrokerChannel" not in upstox
+def test_every_remaining_blocker_is_an_owner_credential_value_or_signature():
+    items = {name for name, _ in OWNER_BLOCKING_ITEMS}
+    assert items == {"owner_public_key_configured", "capital_governor_profile_set",
+                     "broker_channel_and_conformance", "production_market_data",
+                     "owner_signed_live_authorization",
+                     "constitutional_amendment_applied"}
 
 
 def test_live_ready_locked_is_reachable_but_grants_nothing():

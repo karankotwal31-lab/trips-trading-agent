@@ -12,9 +12,7 @@ mistakes this provisional model for a reviewed one.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -45,10 +43,6 @@ class BrokerAutomationUnsupported(ExecutionLayerError):
 
 class IntentError(ExecutionLayerError):
     """An execution intent is structurally invalid."""
-
-
-class MandateIncompatible(ExecutionLayerError):
-    """A broker is not permitted to execute under this deployment's instrument mandate."""
 
 
 class IntentExpired(IntentError):
@@ -314,34 +308,8 @@ class BrokerAdapter(ABC):
         return OrderCapabilities()
 
     @abstractmethod
-    def represent_intent(self, intent: Any, economic: "EconomicRepresentation | None" = None
-                         ) -> Dict[str, Any]:
-        """Translate a canonical intent into this broker's request representation.
-
-        ``economic`` is the already-validated canonical economics the gateway resolved. An adapter
-        must serialize FROM it, never re-derive economics from the raw intent.
-        """
-
-    @abstractmethod
-    def economic_view(self, representation: Mapping[str, Any]) -> Dict[str, Any]:
-        """Decode this broker's own payload back into canonical economics.
-
-        The gateway proves that ``economic_view(represent_intent(i, e)) == e`` for every order.
-        Without a faithful round trip, serialization is unverified and the order does not go.
-        """
-
-    def mandate_verdict(self, scope: Sequence[str]) -> Dict[str, Any]:
-        """Whether this broker may execute under ``scope``. UNKNOWN fails closed."""
-        from .conformance import mandate_verdict_for
-
-        return mandate_verdict_for(self, scope)
-
-    def require_mandate_compatible(self, scope: Sequence[str]) -> None:
-        verdict = self.mandate_verdict(scope)
-        if not verdict["permitted"]:
-            raise MandateIncompatible(
-                f"{self.broker_id} is not permitted to execute under "
-                f"{verdict['mandate_id']}: " + "; ".join(verdict["reasons"]))
+    def represent_intent(self, intent: Any) -> Dict[str, Any]:
+        """Translate a canonical intent into this broker's request representation."""
 
     @abstractmethod
     def submit_order(self, *, client_order_id: str, representation: Mapping[str, Any]) -> Mapping[str, Any]: ...
@@ -436,142 +404,33 @@ def assert_transition_allowed(current: ExecutionState, nxt: ExecutionState) -> N
 # Economic-meaning preservation
 # ---------------------------------------------------------------------------
 
-#: The six fields that carry economic meaning. Everything else a broker needs is representation.
-ECONOMIC_FIELDS: Tuple[str, ...] = (
-    "symbol", "side", "quantity", "order_type", "time_in_force", "limit_price")
-_MEANING_FIELDS = ECONOMIC_FIELDS
-
-#: Approved order vocabulary. An adapter may not invent a shape outside it.
-SIDES: Tuple[str, ...] = ("BUY", "SELL")
-ORDER_TYPES: Tuple[str, ...] = ("LIMIT", "MARKET")
-TIME_IN_FORCE: Tuple[str, ...] = ("DAY", "GTC")
+_MEANING_FIELDS = ("symbol", "side", "quantity", "order_type", "time_in_force", "limit_price")
 
 
-@dataclass(frozen=True)
-class EconomicRepresentation:
-    """A validated, broker-neutral statement of what an order economically IS.
-
-    This is the object a broker adapter is allowed to serialize, and the object the gateway
-    re-proves the serialization against. It exists because an adapter that is handed a raw intent
-    and asked to "translate it" can alter economics inside the translation: Alpaca spells quantity
-    ``qty`` as a *string*, Upstox spells side ``transaction_type`` and time-in-force ``validity``,
-    and neither carries the canonical names. Comparing a provider-native payload field-by-field
-    against the intent is therefore not possible in general - it either misses the fields or, worse,
-    has to be weakened until it passes. So the canonical economics are validated FIRST, in one
-    place, and the adapter is then required to be able to decode its own payload back into exactly
-    that object.
-    """
-
-    symbol: str
-    side: str
-    quantity: int
-    order_type: str
-    time_in_force: str
-    limit_price: Optional[float]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "side": self.side,
-            "quantity": self.quantity,
-            "order_type": self.order_type,
-            "time_in_force": self.time_in_force,
-            "limit_price": self.limit_price,
-        }
-
-    def digest(self) -> str:
-        return hashlib.sha256(canonical_json(self.to_dict())).hexdigest()
-
-    def as_mapping(self) -> Dict[str, Any]:
-        return self.to_dict()
-
-
-def _finite_positive(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise CapabilityError(f"canonical {name} must be a number, got {value!r}")
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        raise CapabilityError(f"canonical {name} must be finite and positive, got {value!r}")
-    return number
-
-
-def canonical_economic_representation(source: Any) -> EconomicRepresentation:
-    """Read and fully validate the canonical economics of an intent or a payload.
-
-    ``source`` may be an :class:`~execution.intent.ExecutionIntent`, any object exposing the six
-    attributes, or a mapping. This is the gate the Universal Broker Gateway runs BEFORE any
-    adapter is asked to serialize anything, so a malformed or ambiguous order is rejected while it
-    is still broker-neutral - no provider-native field has been produced and no submission
-    reservation has been consumed.
-    """
-    if isinstance(source, EconomicRepresentation):
-        return source
-    if isinstance(source, Mapping):
-        get = source.get
-    else:
-        def get(name, default=None):  # noqa: E306 - local adapter over attribute access
-            return getattr(source, name, default)
-
-    for name in ECONOMIC_FIELDS:
-        if name != "limit_price" and get(name) is None:
-            raise CapabilityError(f"canonical economic representation is missing {name!r}")
-
-    symbol = get("symbol")
-    if not isinstance(symbol, str) or not symbol or symbol != symbol.strip().upper():
-        raise CapabilityError("canonical symbol must be a canonical uppercase token")
-    side = get("side")
-    if side not in SIDES:
-        raise CapabilityError(f"canonical side must be one of {SIDES}, got {side!r}")
-    quantity = get("quantity")
-    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
-        raise CapabilityError(f"canonical quantity must be a positive integer, got {quantity!r}")
-    order_type = get("order_type")
-    if order_type not in ORDER_TYPES:
-        raise CapabilityError(f"canonical order_type must be one of {ORDER_TYPES}, got {order_type!r}")
-    time_in_force = get("time_in_force")
-    if time_in_force not in TIME_IN_FORCE:
-        raise CapabilityError(
-            f"canonical time_in_force must be one of {TIME_IN_FORCE}, got {time_in_force!r}")
-
-    limit_price = get("limit_price")
-    if order_type == "LIMIT":
-        if limit_price is None:
-            raise CapabilityError("a canonical LIMIT order requires a limit_price")
-        limit_price = _finite_positive(limit_price, "limit_price")
-    else:
-        if limit_price is not None:
-            raise CapabilityError("a canonical MARKET order must not carry a limit_price")
-        limit_price = None
-
-    return EconomicRepresentation(symbol=symbol, side=side, quantity=int(quantity),
-                                  order_type=order_type, time_in_force=time_in_force,
-                                  limit_price=limit_price)
-
-
-def assert_preserves_economic_meaning(reference: Any, representation: Mapping[str, Any]) -> None:
-    """Prove a translation preserved economic meaning, field for field.
+def assert_preserves_economic_meaning(intent: Any, representation: Mapping[str, Any]) -> None:
+    """Prove an adapter translated representation WITHOUT changing economic meaning.
 
     Rejects the silent conversions the specification forbids: limit->market, quantity rounding,
     time-in-force substitution, price modification, side change, symbol substitution.
-
-    ``reference`` is the validated canonical economics (an :class:`EconomicRepresentation`, an
-    intent, or a mapping) and ``representation`` is what the adapter claims the broker will read
-    back. Both sides are compared in canonical terms; this function is deliberately NOT weakened
-    to accommodate a provider's field names.
     """
     if not isinstance(representation, Mapping):
         raise CapabilityError("adapter representation must be a mapping")
     for name in _MEANING_FIELDS:
         if name not in representation:
             raise CapabilityError(f"adapter representation omitted economic field {name!r}")
-    expected = canonical_economic_representation(reference).to_dict()
+    expected = {
+        "symbol": intent.symbol,
+        "side": intent.side,
+        "quantity": intent.quantity,
+        "order_type": intent.order_type,
+        "time_in_force": intent.time_in_force,
+        "limit_price": intent.limit_price,
+    }
     for name, want in expected.items():
         got = representation[name]
         if name == "quantity":
             if isinstance(got, bool) or not isinstance(got, int):
                 raise CapabilityError("adapter quantity must be an integer")
-        if name == "limit_price" and want is None and got is None:
-            continue
         if got != want:
             raise CapabilityError(
                 f"adapter altered economic meaning for {name!r}: authorized {want!r}, represented {got!r}"

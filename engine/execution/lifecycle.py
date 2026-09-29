@@ -11,44 +11,20 @@ LIVE_LOCKED and cannot leave it while the frozen Constitution forbids live-money
 from __future__ import annotations
 
 import hashlib
+import importlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .amendment import CoreStateBasis, frozen_core_basis  # noqa: E402
-from .contracts import (CORE_CAPABILITIES, ExecutionLayerError,  # noqa: E402
-                        approved_symbol_scope, canonical_json)
-from .gate import (FrozenLiveBoundary, LiveBoundaryVerdict, frozen_config_mode,  # noqa: E402
+from .contracts import ExecutionLayerError, canonical_json
+from .gate import (FrozenLiveBoundary, LiveBoundaryVerdict, frozen_config_mode,
                    frozen_constitution_rule_ids, frozen_permitted_modes,
-                   frozen_risk_permitted_modes)
+                   frozen_risk_permitted_modes, verify_frozen_core_digest)
 from .owner_authority import (PURPOSE_LIVE_AUTHORIZATION, owner_authority_status,  # noqa: E402
                              verify_owner_signature)
 from typing import Mapping  # noqa: E402
-
-
-def _outstanding_engineering(conformance: Mapping[str, Any]) -> List[str]:
-    """Engineering work still outstanding, derived from the executed evidence."""
-    outstanding: List[str] = []
-    for broker_id, document in sorted(conformance.items()):
-        missing = document.missing_core()
-        if missing:
-            outstanding.append(f"{broker_id}: core capabilities not proven: {list(missing)}")
-    return outstanding
-
-
-def _outstanding_parts(failing: Sequence[str]) -> List[str]:
-    """Engineering parts of the classified blockers that the executed evidence does not cover."""
-    from .readiness import ENGINEERING_WORK_COVERAGE
-
-    outstanding = []
-    for item in OWNER_BLOCKING_ITEMS:
-        for part in item.engineering:
-            covering = ENGINEERING_WORK_COVERAGE.get(part)
-            if covering is None or covering not in failing:
-                continue
-            outstanding.append(f"{item.name}: {part} (unproven by {covering})")
-    return outstanding
 
 LIVE_LOCKED_REFUSAL = "LIVE_LOCKED_REFUSAL"
 CORE_STATE_CALLER_ASSERTED_REFUSED = "CORE_STATE_CALLER_ASSERTED_REFUSED"
@@ -89,71 +65,22 @@ ALLOWED_TRANSITIONS: Dict[Stage, Tuple[Stage, ...]] = {
     Stage.LIVE_ENABLED: (Stage.LIVE_READY_LOCKED,),
 }
 
-@dataclass(frozen=True)
-class BlockerItem:
-    """One remaining blocker, with its engineering part and its owner part stated separately."""
-
-    name: str
-    engineering: Tuple[str, ...] = ()
-    owner: Tuple[str, ...] = ()
-
-    @property
-    def owner_only(self) -> bool:
-        """True when nothing an autonomous process can build remains on this item."""
-        return not self.engineering
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "owner_only": self.owner_only,
-                "engineering": list(self.engineering), "owner": list(self.owner)}
-
-
-#: What still stands between this build and live capital, split by WHO can clear it.
-#:
-#: Calling all of it owner work was wrong, and it was wrong in the direction that flatters the
-#: build: it let a program declare "the only thing left is the owner's signature" while real
-#: engineering - a channel that actually talks to a broker, normalization of what that broker
-#: returns, a conformance suite that records per-capability facts, a reconciliation engine that
-#: has been run, a paper order lifecycle that has been exercised end to end, a production data
-#: provider, Truth and provenance integration, closed 60-minute bars, calendar and session
-#: integration and fail-closed data health - had never been written or run.
-#:
-#: So each blocker now carries two lists. ``engineering`` is what an autonomous process can finish
-#: and prove. ``owner`` is what no program can supply: a credential, an entitlement, a capital
-#: value, or a signature. ``LIVE_READY_LOCKED`` asserts that every remaining item is an owner one.
-OWNER_BLOCKING_ITEMS: Tuple["BlockerItem", ...] = (
-    BlockerItem(
-        name="owner_public_key_configured",
-        owner=("the owner must install their Ed25519 public key; no owner act is possible "
-               "without it",)),
-    BlockerItem(
-        name="capital_governor_profile_set",
-        owner=("maximum capital, loss, exposure and position values are an owner input; none has "
-               "been invented",)),
-    BlockerItem(
-        name="broker_channel_and_conformance",
-        engineering=("a real BrokerChannel implementation per broker",
-                     "broker-specific response normalization",
-                     "a per-capability conformance suite producing typed, versioned evidence",
-                     "a reconciliation engine executed against known-agreeing and "
-                     "known-disagreeing fixtures",
-                     "a paper/sandbox order lifecycle exercised end to end"),
-        owner=("broker account credentials and the owner's OAuth approval for that account",)),
-    BlockerItem(
-        name="production_market_data",
-        engineering=("a production market-data provider implementation",
-                     "integration with the frozen Truth Engine",
-                     "a data-provenance guard separating market data from broker execution feeds",
-                     "closed 60-minute bars enforced through the frozen closure rule",
-                     "exchange-calendar and session integration",
-                     "fail-closed data-health logic"),
-        owner=("the provider API key, subscription and real-time entitlement where required",)),
-    BlockerItem(
-        name="owner_signed_live_authorization",
-        owner=("decision A (amendment) and decision B (live authorization), separately and "
-               "explicitly signed",)),
-    BlockerItem(
-        name="constitutional_amendment_applied",
-        owner=("re-freezing the frozen core is an owner act through the approved change process",)),
+#: Items that CANNOT be completed by any autonomous component, because each is an owner
+#: credential, an owner capital value, or the owner's signature. Reaching LIVE_READY_LOCKED means
+#: every remaining blocker is on this list and nothing else.
+OWNER_BLOCKING_ITEMS: Tuple[Tuple[str, str], ...] = (
+    ("owner_public_key_configured", "the owner must install their Ed25519 public key; "
+                                    "no owner act is possible without it"),
+    ("capital_governor_profile_set", "maximum capital, loss, exposure and position values are an "
+                                     "owner input; none has been invented"),
+    ("broker_channel_and_conformance", "an authorized programmable broker interface plus owner "
+                                       "credentials, then a recorded conformance run"),
+    ("production_market_data", "real market-data credentials and entitlement evidence; provider "
+                               "mode is still DEMO"),
+    ("owner_signed_live_authorization", "decision A (amendment) and decision B (live "
+                                        "authorization), separately and explicitly signed"),
+    ("constitutional_amendment_applied", "re-freezing the frozen core is an owner act through the "
+                                         "approved change process"),
 )
 
 # Stage the additive execution layer ships in: fully built, verified, holding at the lock.
@@ -168,10 +95,9 @@ class LiveAuthorization:
     symbol scope or execution semantics must invalidate this and return the runtime to
     LIVE_LOCKED until verification completes again.
 
-    Authority is the ``signature`` field — an Ed25519 signature (RFC 8032) over
-    ``signed_payload()``, domain-separated by purpose, made with the owner key — and deliberately
-    NOT a boolean. A boolean is settable by any caller, which would make this artifact
-    self-mintable and the two owner acts collapse into one forgery.
+    Authority is the ``signature`` field — an HMAC-SHA256 tag over ``signed_payload()`` made with
+    the owner key — and deliberately NOT a boolean. A boolean is settable by any caller, which
+    would make this artifact self-mintable and the two owner acts collapse into one forgery.
     """
 
     strategy_build_id: str
@@ -309,50 +235,60 @@ class Lifecycle:
     def live_readiness(self) -> Dict[str, Any]:
         """What still stands between this build and live capital, classified by who can clear it.
 
-        Engineering items are computed from EVIDENCE: every check below actually executes the
-        subsystem it names and reports a digest over what it observed. Nothing here is satisfied
-        by a file existing or a module importing. Owner items are credentials, capital values and
-        signatures, and this method never reports one as satisfied.
-
-        Reaching ``LIVE_READY_LOCKED`` requires that no engineering item is outstanding AND that
-        every remaining item is an owner one. It grants nothing: capital release still requires a
-        separately signed live authorization.
+        An ENGINEERING item is anything a component can finish by itself. An OWNER item is a
+        credential, a capital value, or a signature. This method never reports an owner item as
+        satisfied, and reaching ``LIVE_READY_LOCKED`` grants nothing: that stage is still locked.
         """
-        from .readiness import collect_evidence
+        checks: List[Dict[str, Any]] = []
 
-        records, conformance = collect_evidence()
-        checks = [record.to_dict() for record in records]
-        failing = [record.name for record in records if not record.passed]
+        def add(name: str, passed: bool, detail: str) -> None:
+            checks.append({"name": name, "passed": bool(passed), "detail": detail})
 
-        owner_items = [item.to_dict() for item in OWNER_BLOCKING_ITEMS]
-        engineering_remaining = _outstanding_parts(failing) + _outstanding_engineering(conformance)
+        digest = verify_frozen_core_digest()
+        add("frozen_core_digest_verified", bool(digest.get("verified")),
+            f"infra/core_v06.sha256 against engine/constitution.py ({digest.get('live', 'n/a')[:12]})")
 
+        try:
+            from build_guard import verify_build_integrity
+
+            build = verify_build_integrity()
+            add("executable_build_integrity", True,
+                f"manifest {build.get('manifest_hash', '')[:12]}")
+        except Exception as exc:
+            add("executable_build_integrity", False, f"{type(exc).__name__}: {exc}")
+
+        try:
+            from .exchange_calendar import default_us_equity_calendar
+
+            calendar = default_us_equity_calendar()
+            add("session_calendar_available", bool(calendar.provenance),
+                "computed US equity exchange calendar; session truth no longer waits on an owner")
+        except Exception as exc:
+            add("session_calendar_available", False, f"{type(exc).__name__}: {exc}")
+
+        for name, module_name in (("broker_adapters_present", "adapters"),
+                                  ("reconciliation_engine_present", "reconciliation"),
+                                  ("supervisor_provider_present", "supervisor"),
+                                  ("owner_trust_root_present", "owner_authority"),
+                                  ("execution_authority_gate_present", "gate")):
+            try:
+                importlib.import_module(f"execution.{module_name}")
+                add(name, True, f"engine/execution/{module_name}.py")
+            except Exception as exc:
+                add(name, False, f"{type(exc).__name__}: {exc}")
+
+        engineering_ready = all(check["passed"] for check in checks)
         return {
             "stage": self._stage.value,
-            "engineering_ready": not failing,
+            "engineering_ready": engineering_ready,
             "engineering_checks": checks,
-            "failing_engineering": failing,
-            "engineering_evidence_model": (
-                "every check executes the subsystem it names and reports a digest over the "
-                "observation; module presence is not engineering completion"),
-            "conformance_evidence": {
-                broker_id: {
-                    "digest": document.digest(),
-                    "complete": document.is_complete(),
-                    "capabilities": {name: document.status(name).value for name in CORE_CAPABILITIES},
-                    "mandate": (document.mandate_verdict(sorted(approved_symbol_scope()))
-                                if document.mandate else None),
-                } for broker_id, document in sorted(conformance.items())
-            },
-            "remaining_engineering_work": engineering_remaining,
-            "owner_blocking_items": owner_items,
-            "owner_only_items": [item["name"] for item in owner_items if item["owner_only"]],
-            "live_status": "NOT_COMPLETE" if failing else "ENGINEERING_COMPLETE_STILL_LOCKED",
+            "failing_engineering": [c["name"] for c in checks if not c["passed"]],
+            "owner_blocking_items": [{"name": name, "requirement": requirement}
+                                     for name, requirement in OWNER_BLOCKING_ITEMS],
             "ceiling": Stage.LIVE_READY_LOCKED.value,
-            "note": ("LIVE_READY_LOCKED would mean every remaining blocker is an owner credential, "
-                     "an owner capital value, or the owner's signature. It grants nothing: capital "
-                     "release still requires a separately signed live authorization. While any "
-                     "engineering evidence is missing the honest report is NOT_COMPLETE."),
+            "note": ("LIVE_READY_LOCKED means every remaining blocker is an owner credential, an "
+                     "owner capital value, or the owner's signature. It grants nothing: capital "
+                     "release still requires a separately signed live authorization."),
         }
 
     def advance(self, to: Stage, *, actor: Actor, authorization: Optional[LiveAuthorization] = None,

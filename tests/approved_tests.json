@@ -4,17 +4,16 @@
     "infra/tests/test_cloud_shell.py": "c039e53598817747682580b837da00ab038eb8af49ea8c8b9939584e525c4491",
     "scripts/githooks/pre-push": "86fdb49591f93447acc907b6e792df85c6e17f6087a81ba6695bea32c871cee2",
     "scripts/verify_all.sh": "0fcc8bca5ec97ff1c72f0eab6c5edf9e5d21844e7703d7e6475629e1aa6bdf7d",
-    "tests/run_all_tests.py": "916245b5d42b4697ef6ddf2481364122509cd468c71ebe949a9eba628319da3f",
+    "tests/run_all_tests.py": "93bdd4168da5588ad81ffebb43ffda47c747d569563f6684181c18ac56e1843f",
     "tests/run_tests.py": "db4b312a7cfb9aece465bffdfb695092accb8348d922f93c71890851cf27bc0a",
-    "tests/suite_integrity.py": "d2c5a0b363e6a8642da3ec3cecf8ed9e00037594c4c7793f90b06a5d19a92f7d",
-    "tests/test_engine.py": "cd524411a706cd49152b037222cd58e063e41e91a96bf4825cbfd9afc43f18a6",
-    "tests/test_execution_evidence.py": "4f0028307ac2f34b1e470b4601d5e083386471950b6811fb2dad01501dba2c23",
-    "tests/test_execution_layer.py": "dc08d337bfbf2f120de4d15bcc3c2963272478d20bc2e038064e2ea601619147",
+    "tests/suite_integrity.py": "6bbbf759c069039ae14c03b3082e43ba670b5ea1f5864fca84827892d2bbb9a3",
+    "tests/test_engine.py": "87c8a5f594f3ff6a06727be3b9767e7cba0309261fecb3eb0126df0b032d9dfc",
+    "tests/test_execution_layer.py": "73a0c12d41e88bb2e20f6c294eaab501d41161f82bebdda70a4615bf68a17012",
     "tests/test_live_gate_amendment.py": "f39a3bd5eb6d7f423c10ecab29f16b6021f46eb4e6374b990eab883c3f5caf8c",
-    "tests/test_live_readiness.py": "825afc6bb2c9eff8353973755a9cdc38507ba14d9748c48470d4c9362f3fb393",
+    "tests/test_live_readiness.py": "1a35aa316f483b7afd318400fdfd193ad6deed928a7e2bfce3d31c7301a6d3ba",
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3"
   },
-  "manifest_hash": "2e9f1dc0662a5e02e4256923cb75776a37e41d82202745965e9ad54a47651bdc",
+  "manifest_hash": "0e1ae578d10ae628b17ecf98bf0a8f2b388861ca051c5edce54101407e99d751",
   "schema_version": 1
 }

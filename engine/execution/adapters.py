@@ -39,9 +39,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .contracts import (CORE_CAPABILITIES, BrokerAccount, BrokerAdapter, BrokerHealth,
-                        BrokerPosition, CapabilityMatrix, CapabilityStatus, EconomicRepresentation,
-                        ExecutionState, OrderCapabilities, canonical_json,
-                        canonical_economic_representation)
+                        BrokerPosition, CapabilityMatrix, CapabilityStatus, ExecutionState,
+                        OrderCapabilities, canonical_json)
 
 #: A broker-side order tag is a fixed-width field. Silently truncating an idempotency key would
 #: destroy deduplication, so the bound is enforced rather than adapted around.
@@ -106,6 +105,7 @@ def _rows(response: Any, *, what: str) -> list:
 
 
 def _single_order_id(data: Any) -> str:
+    """Ported: exactly one verifiable order id, or refuse and reconcile. Never guess."""
     if not isinstance(data, Mapping):
         raise BrokerContractError("malformed order acknowledgement; reconcile before retry")
     ids = data.get("order_ids")
@@ -122,18 +122,6 @@ def _single_order_id(data: Any) -> str:
     if not isinstance(candidate, str) or not candidate.strip():
         raise BrokerContractError("invalid broker order identity; reconcile before retry")
     return candidate
-
-
-def _canonical(intent: Any, economic: Optional[EconomicRepresentation]) -> EconomicRepresentation:
-    """Resolve the canonical economics an adapter may serialize from.
-
-    The gateway always passes them, already validated. A direct caller may omit them, in which case
-    they are validated here - the same validation, so there is one authority, not two.
-    """
-    try:
-        return canonical_economic_representation(economic if economic is not None else intent)
-    except Exception as exc:
-        raise BrokerContractError(f"canonical economic representation is invalid: {exc}") from exc
 
 
 class BrokerChannel(ABC):
@@ -169,37 +157,28 @@ class BrokerChannel(ABC):
 
 
 class _ChannelInjectedAdapter(BrokerAdapter):
-    """Shared shape: per-capability capabilities, and a refusal at every boundary without a channel.
-
-    There is deliberately no blanket conformance flag argument. It used to mean "flip all fifteen
-    core capabilities to SUPPORTED", which is a claim with no content: nothing recorded which
-    capability was exercised, against what interface, in what environment, by what run. The
-    replacement is :class:`~execution.conformance.ConformanceEvidence`, attached per capability, and
-    an adapter with no evidence attached answers UNVERIFIED for every capability.
-    """
+    """Shared shape: capabilities, and a refusal at every boundary without a channel."""
 
     def __init__(self, *, channel: Optional[BrokerChannel] = None,
-                 conformance: Optional[Any] = None,
+                 conformance_verified: bool = False,
                  environment: str = "TEST_ENV", account_id: Optional[str] = None) -> None:
         self._channel = channel
-        self._conformance = conformance
+        self._conformance_verified = bool(conformance_verified)
         self._environment = environment
         self._account_id = account_id
 
     # -- capabilities -----------------------------------------------------
-    @property
-    def conformance_evidence(self) -> Optional[Any]:
-        return self._conformance
-
     def capability_matrix(self) -> CapabilityMatrix:
-        """Each capability resolves from its own record. Absent evidence is UNVERIFIED.
+        """Fail closed: nothing is verified until an owner-authorized conformance run says so.
 
-        A channel alone is not permission, and neither is a boolean. Verification is a recorded,
-        digest-checked observation from a real conformance run against a real interface.
+        A channel alone is not permission. Verification is a recorded fact from conformance testing
+        against the real interface, never an inference from configuration.
         """
-        if self._conformance is None:
-            return CapabilityMatrix(statuses={}, source=f"{self.broker_id}:no_conformance_evidence")
-        return self._conformance.matrix()
+        status = (CapabilityStatus.SUPPORTED
+                  if (self._channel is not None and self._conformance_verified)
+                  else CapabilityStatus.UNVERIFIED)
+        return CapabilityMatrix(statuses={name: status for name in CORE_CAPABILITIES},
+                                source=self.broker_id)
 
     def health(self) -> BrokerHealth:
         if self._channel is None:
@@ -263,68 +242,28 @@ class UpstoxAdapter(_ChannelInjectedAdapter):
                                  sides=frozenset({"BUY", "SELL"}), declared=True,
                                  source=f"{self.broker_id}:{self._upstox_environment}")
 
-    def represent_intent(self, intent: Any, economic: Optional[EconomicRepresentation] = None
-                         ) -> Dict[str, Any]:
-        """Serialize ALREADY-VALIDATED canonical economics into Upstox's field names.
-
-        Ported: every check still happens here, before any request could be built. The economics
-        themselves were validated by the gateway first, so this step cannot re-derive them from the
-        raw intent and therefore cannot quietly change one.
-        """
+    def represent_intent(self, intent: Any) -> Dict[str, Any]:
+        """Ported: every check happens here, before any request could be built."""
+        if getattr(intent, "order_type", None) == "MARKET" and getattr(intent, "limit_price", None):
+            raise BrokerContractError("a market order may not carry a limit price")
         if getattr(intent, "slice", False) is not False:
             raise BrokerContractError("sliced orders are not supported by this adapter")
-        tag = _require_tag(getattr(intent, "idempotency_key", None))
-        economics = _canonical(intent, economic)
-        if economics.order_type == "MARKET" and economics.limit_price is not None:
-            raise BrokerContractError("a market order may not carry a limit price")
+        _require_tag(getattr(intent, "idempotency_key", None))
+        quantity = _whole_quantity(getattr(intent, "quantity", None))
+        price = _non_negative(getattr(intent, "limit_price", None) or 0.0, field="price")
         return {
-            "tradingsymbol": economics.symbol,
-            "quantity": _whole_quantity(economics.quantity),
+            "quantity": quantity,
             "product": "D",
-            "validity": economics.time_in_force,
-            "price": 0.0 if economics.limit_price is None
-                     else _non_negative(economics.limit_price, field="price"),
-            "tag": tag,
-            "order_type": economics.order_type,
-            "transaction_type": economics.side,
+            "validity": getattr(intent, "time_in_force", "DAY"),
+            "price": price,
+            "tag": intent.idempotency_key,
+            "order_type": getattr(intent, "order_type", "MARKET"),
+            "transaction_type": str(getattr(intent, "side", "")).upper(),
             "disclosed_quantity": 0,
             "trigger_price": 0.0,
             "is_amo": False,
             "slice": False,
             "market_protection": -1,
-        }
-
-    def economic_view(self, representation: Mapping[str, Any]) -> Dict[str, Any]:
-        """Decode the Upstox payload back into canonical economics. The gateway proves equality.
-
-        Nothing here is forgiving. ``quantity`` must be an exact integer, ``validity`` and
-        ``order_type`` must be exactly as canonical, and a LIMIT order carrying a zero price is a
-        price alteration rather than a formatting detail.
-        """
-        if not isinstance(representation, Mapping):
-            raise BrokerContractError("upstox representation must be a mapping")
-        symbol = representation.get("tradingsymbol")
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise BrokerContractError("upstox representation carries no tradingsymbol")
-        order_type = representation.get("order_type")
-        price = representation.get("price")
-        if order_type == "MARKET":
-            limit_price = None
-        else:
-            if isinstance(price, bool) or not isinstance(price, (int, float)):
-                raise BrokerContractError("upstox limit price is not numeric")
-            if float(price) <= 0:
-                raise BrokerContractError(
-                    "upstox dropped the limit price of a non-market order; that is a price "
-                    "alteration, not a formatting difference")
-            limit_price = float(price)
-        return {
-            "symbol": symbol,
-            "side": str(representation.get("transaction_type") or "").upper(),
-            "quantity": _whole_quantity(representation.get("quantity")),
-            "order_type": str(order_type or "").upper(),
-            "time_in_force": str(representation.get("validity") or "").upper(),
-            "limit_price": limit_price,
         }
 
     def interpret_acknowledgement(self, response: Any) -> Dict[str, Any]:
@@ -376,66 +315,22 @@ class AlpacaAdapter(_ChannelInjectedAdapter):
                                  sides=frozenset({"BUY", "SELL"}), declared=True,
                                  source=f"{self.broker_id}:{self._alpaca_environment}")
 
-    def represent_intent(self, intent: Any, economic: Optional[EconomicRepresentation] = None
-                         ) -> Dict[str, Any]:
-        """Serialize ALREADY-VALIDATED canonical economics into Alpaca's field names.
-
-        Alpaca spells quantity ``qty`` as a *string* and lowercases the enums, which is precisely
-        why translation used to be unverifiable: the canonical field names simply are not there.
-        ``economic_view`` is the counterpart that decodes them back, and the gateway proves the
-        round trip for every order.
-        """
-        tag = _require_tag(getattr(intent, "idempotency_key", None))
-        economics = _canonical(intent, economic)
-        if economics.order_type == "LIMIT" and economics.limit_price is None:
+    def represent_intent(self, intent: Any) -> Dict[str, Any]:
+        _require_tag(getattr(intent, "idempotency_key", None))
+        quantity = _whole_quantity(getattr(intent, "quantity", None))
+        if getattr(intent, "order_type", None) == "LIMIT" and not getattr(intent, "limit_price", None):
             raise BrokerContractError("a limit order requires a limit price")
         representation: Dict[str, Any] = {
-            "symbol": economics.symbol,
-            "qty": str(_whole_quantity(economics.quantity)),
-            "side": economics.side.lower(),
-            "type": economics.order_type.lower(),
-            "time_in_force": economics.time_in_force.lower(),
-            "client_order_id": tag,
+            "symbol": getattr(intent, "symbol", None),
+            "qty": str(quantity),
+            "side": str(getattr(intent, "side", "")).lower(),
+            "type": str(getattr(intent, "order_type", "MARKET")).lower(),
+            "time_in_force": str(getattr(intent, "time_in_force", "DAY")).lower(),
+            "client_order_id": intent.idempotency_key,
         }
-        if economics.order_type == "LIMIT":
-            representation["limit_price"] = str(
-                _non_negative(economics.limit_price, field="limit_price"))
+        if representation["type"] == "limit":
+            representation["limit_price"] = str(_non_negative(intent.limit_price, field="limit_price"))
         return representation
-
-    def economic_view(self, representation: Mapping[str, Any]) -> Dict[str, Any]:
-        """Decode the Alpaca payload back into canonical economics, refusing anything lossy.
-
-        A fractional ``qty`` string, a missing or non-numeric ``limit_price`` on a LIMIT order, or a
-        blank symbol are all refusals. They are not rounding and they are not defaults.
-        """
-        if not isinstance(representation, Mapping):
-            raise BrokerContractError("alpaca representation must be a mapping")
-        symbol = representation.get("symbol")
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise BrokerContractError("alpaca representation carries no symbol")
-        order_type = str(representation.get("type") or "").upper()
-        if order_type == "MARKET":
-            limit_price = None
-        else:
-            raw_price = representation.get("limit_price")
-            if isinstance(raw_price, bool) or not isinstance(raw_price, (int, float, str)):
-                raise BrokerContractError("alpaca limit order carries no numeric limit price")
-            try:
-                limit_price = float(raw_price)
-            except (TypeError, ValueError):
-                raise BrokerContractError("alpaca limit price is not numeric") from None
-            if not math.isfinite(limit_price) or limit_price <= 0:
-                raise BrokerContractError(
-                    "alpaca dropped the limit price of a non-market order; that is a price "
-                    "alteration, not a formatting difference")
-        return {
-            "symbol": symbol,
-            "side": str(representation.get("side") or "").upper(),
-            "quantity": _whole_quantity(representation.get("qty")),
-            "order_type": order_type,
-            "time_in_force": str(representation.get("time_in_force") or "").upper(),
-            "limit_price": limit_price,
-        }
 
     def interpret_acknowledgement(self, response: Any) -> Dict[str, Any]:
         if not isinstance(response, Mapping) or not response.get("id"):

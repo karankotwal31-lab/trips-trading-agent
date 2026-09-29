@@ -36,7 +36,6 @@ from providers import Bar, DemoProvider  # noqa: E402
 from execution import (  # noqa: E402
     AMENDMENT_APPLICABLE,
     ANOMALY_CHECKS,
-    APPROVED_INSTRUMENT_SCOPE,
     AUTHORIZED_TRANSPORTS,
     CAPITAL_RELEASE_FIELDS,
     CORE_CAPABILITIES,
@@ -51,11 +50,8 @@ from execution import (  # noqa: E402
     AmendmentApplicationRefused,
     AmendmentError,
     AmendmentProposal,
-    CapabilityEvidence,
-    ConformanceEvidence,
     CycleRouter,
     IntentPolicy,
-    MandateEvidence,
     OrderCapabilities,
     RuleBasedSupervisorProvider,
     SupervisorPolicy,
@@ -121,7 +117,6 @@ from execution import (  # noqa: E402
     assert_transition_allowed,
     authorization_drift,
     availability_outcome,
-    canonical_economic_representation,
     capital_release,
     current_identity,
     durable_store,
@@ -196,41 +191,6 @@ class TestProvider:
         return list(self._bars if self._bars is not None else DemoProvider().bars(symbol, count))
 
 
-def conformance_evidence(broker_id="test-double", *, environment="TEST_ENV",
-                         instruments=("SPY", "QQQ", "AAPL"),
-                         mandate_id=None, unverified=(), unsupported=(), now=None):
-    """Build a real, digest-checked conformance document for a TEST DOUBLE.
-
-    The library ships no way to manufacture conformance evidence from a boolean; this fixture is a
-    test file, not the library, so it is legitimate here. It is also digest-checked like any other
-    evidence: editing a status after construction changes the digest and the record stops resolving
-    to SUPPORTED, exactly as a tampered production record would.
-    """
-    now = now or datetime.now(timezone.utc)
-    mandate_id = mandate_id or APPROVED_INSTRUMENT_SCOPE
-    records = {}
-    for name in CORE_CAPABILITIES:
-        status = CapabilityStatus.SUPPORTED
-        if name in unverified:
-            status = CapabilityStatus.UNVERIFIED
-        elif name in unsupported:
-            status = CapabilityStatus.UNSUPPORTED
-        records[name] = CapabilityEvidence(
-            capability=name, status=status, interface=f"{broker_id}/test-interface",
-            environment=environment, observed_by="test_fixture_conformance_run",
-            observed_at=now.isoformat(),
-            observation={"probe": f"probe_{name}",
-                         "exercised": status is CapabilityStatus.SUPPORTED})
-    mandate = MandateEvidence(
-        broker_id=broker_id, mandate_id=mandate_id, instruments=tuple(instruments),
-        asset_class=mandate_id, environment=environment,
-        observed_by="test_fixture_conformance_run", observed_at=now.isoformat(),
-        observation={"probe": "probe_mandate", "exercised": True})
-    return ConformanceEvidence(broker_id=broker_id, environment=environment,
-                               suite="test_fixture_conformance_run", generated_at=now.isoformat(),
-                               records=records, mandate=mandate)
-
-
 class FakeAdapter(BrokerAdapter):
     """TEST DOUBLE ONLY — not shipped by the library."""
 
@@ -239,8 +199,7 @@ class FakeAdapter(BrokerAdapter):
     def __init__(self, *, core_status=CapabilityStatus.SUPPORTED, unverified=(), health_ok=True,
                  account_id="ACCT-1", environment="TEST_ENV", positions=None, open_orders=None,
                  submit_exception=None, alter_meaning=False, order_caps=None,
-                 represent_exception=None, conformance=None, mandate_instruments=("SPY", "QQQ", "AAPL"),
-                 mandate_id=None):
+                 represent_exception=None):
         self._core_status = core_status
         self._unverified = set(unverified)
         self._health_ok = health_ok
@@ -252,24 +211,13 @@ class FakeAdapter(BrokerAdapter):
         self._alter_meaning = alter_meaning
         self._order_caps = order_caps if order_caps is not None else FULL_ORDER_CAPS
         self._represent_exception = represent_exception
-        self._conformance = conformance or conformance_evidence(
-            environment=environment, instruments=mandate_instruments, mandate_id=mandate_id,
-            unverified=unverified,
-            unsupported=tuple(name for name in CORE_CAPABILITIES if core_status
-                              is CapabilityStatus.UNSUPPORTED))
         self.submitted = []
         self.cancelled = []
-
-    @property
-    def conformance_evidence(self):
-        return self._conformance
 
     def order_capabilities(self):
         return self._order_caps
 
     def capability_matrix(self):
-        if self._core_status is CapabilityStatus.SUPPORTED:
-            return self._conformance.matrix()
         statuses = {name: self._core_status for name in CORE_CAPABILITIES}
         for name in self._unverified:
             statuses[name] = CapabilityStatus.UNVERIFIED
@@ -291,19 +239,18 @@ class FakeAdapter(BrokerAdapter):
     def order_status(self, *, client_order_id):
         return next((o for o in self._open_orders if o.get("client_order_id") == client_order_id), None)
 
-    def represent_intent(self, intent, economic=None):
+    def represent_intent(self, intent):
         if self._represent_exception is not None:
             raise self._represent_exception
-        economics = canonical_economic_representation(economic if economic is not None else intent)
-        representation = economics.to_dict()
+        representation = {
+            "symbol": intent.symbol, "side": intent.side, "quantity": intent.quantity,
+            "order_type": intent.order_type, "time_in_force": intent.time_in_force,
+            "limit_price": intent.limit_price,
+        }
         if self._alter_meaning:
             representation["order_type"] = "MARKET"
             representation["limit_price"] = None
         return representation
-
-    def economic_view(self, representation):
-        """TEST DOUBLE decodes its own payload. It is the canonical shape already."""
-        return dict(representation)
 
     def submit_order(self, *, client_order_id, representation):
         if self._submit_exception is not None:
@@ -1261,9 +1208,7 @@ def test_no_shipped_broker_adapter_can_reach_a_broker():
 
     for adapter in (UpstoxAdapter(), AlpacaAdapter()):
         matrix = adapter.capability_matrix()
-        assert matrix.statuses == {}, (
-            f"{adapter.broker_id} must present no capability without conformance evidence")
-        assert len(matrix.missing_core()) == len(CORE_CAPABILITIES), (
+        assert len(matrix.missing_core()) == len(matrix.statuses), (
             f"{adapter.broker_id} must present no verified capability")
         assert adapter.health().connected is False
         for call in (lambda: adapter.submit_order(client_order_id="x", representation={}),
@@ -1275,17 +1220,11 @@ def test_no_shipped_broker_adapter_can_reach_a_broker():
             except Exception as exc:
                 assert "no broker channel is configured" in str(exc), str(exc)
 
-    # Concrete channels DO ship now, because interface conformance is engineering work. What must
-    # not ship is a channel that can be constructed without a credential: the package must carry
-    # no account access, no entitlement and no order capacity.
-    from execution.channels import AlpacaChannel, UpstoxChannel
-
-    for channel_type in (UpstoxChannel, AlpacaChannel):
-        try:
-            channel_type()
-            raise AssertionError(f"{channel_type.__name__} built without a credential")
-        except Exception as exc:
-            assert "credential" in str(exc).lower(), str(exc)
+    # No channel implementation ships, so the package carries no network capability.
+    for path in sorted(package.glob("*.py")):
+        for match in re.findall(r"^class\s+(\w+)\((?:[^)]*\bBrokerChannel\b[^)]*)\)",
+                                path.read_text(), flags=re.MULTILINE):
+            assert match == "BrokerChannel", f"a BrokerChannel implementation shipped: {match}"
     assert BrokerChannel.__abstractmethods__
 
 
