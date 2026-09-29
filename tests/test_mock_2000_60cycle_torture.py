@@ -479,5 +479,7 @@ def test_mock_2000_60cycle_torture():
 
 
 if __name__ == "__main__":
-    test_mock_2000_60cycle_torture()
-    print("ALL PASS (1 mock 60-cycle torture campaign)")
+    report = run_campaign()
+    assert report["accelerated_cycles"] == 60
+    assert report["starting_equity"] == 2000.0
+    print("TRIPS_60_CYCLE_FINAL=" + json.dumps(report, sort_keys=True))
