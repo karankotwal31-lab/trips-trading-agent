@@ -39,6 +39,7 @@ PINNED_FILES = (
     "tests/test_execution_layer.py",
     "tests/test_task_safety_kernel.py",
     "tests/test_commodity_readiness.py",
+    "tests/test_empire_audit_40000_five_scenarios.py",
     "tests/test_live_gate_amendment.py",
     "tests/test_live_readiness.py",
     "tests/test_execution_evidence.py",
