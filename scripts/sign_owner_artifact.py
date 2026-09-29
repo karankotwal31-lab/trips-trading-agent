@@ -75,10 +75,22 @@ def keygen(out_path: str) -> int:
     destination = Path(out_path).expanduser()
     _refuse_in_repo(destination, "the owner private key")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        raise SystemExit(
+            f"refusing to overwrite an existing owner private key at {destination}")
     seed = secrets.token_bytes(32)
     private, public = ed25519.generate_keypair(seed)
-    destination.write_text(private.hex() + "\n")
-    destination.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(destination, flags, stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(private.hex() + "\n")
+    except Exception:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise
     document = {
         "algorithm": ALGORITHM,
         "configured": True,
@@ -150,14 +162,20 @@ def main() -> int:
     parser.add_argument("--key", help=f"path to the owner private key (or set {PRIVATE_KEY_ENV})")
     parser.add_argument("--status", action="store_true",
                         help="report whether owner acts are possible; prints no key material")
-    parser.add_argument("--keygen", action="store_true", metavar="OUT",
-                        help="generate an Ed25519 keypair; writes the private key to OUT (0600)")
+    parser.add_argument("--keygen", action="store_true",
+                        help="generate an Ed25519 keypair (requires --out PATH)")
+    parser.add_argument("--out",
+                        help="private-key output path for --keygen; must be outside the repository")
     args = parser.parse_args()
 
     if args.keygen:
-        if not args.key:
+        if not args.out:
             parser.error("--keygen requires --out PATH for the private key")
-        return keygen(args.key)
+        if args.key:
+            parser.error("--key is for signing; use --out PATH with --keygen")
+        return keygen(args.out)
+    if args.out:
+        parser.error("--out is only valid with --keygen")
     if args.status:
         print(json.dumps(owner_authority_status(), indent=2, sort_keys=True))
         return 0
