@@ -238,6 +238,12 @@ from .production_data import (  # noqa: E402
     ProductionDataVerificationError,
     verify_dual_source_production_data,
 )
+from .realtime_providers import (  # noqa: E402
+    TWELVE_DATA_API_BASE,
+    TWELVE_DATA_CREDENTIAL_ENV,
+    TWELVE_DATA_PROVIDER_INTERVAL,
+    TwelveDataRealtimeProvider,
+)
 from .production_runtime import (  # noqa: E402
     ACCOUNT_ENV,
     ALPACA_KEY_ENV,
@@ -353,6 +359,8 @@ __all__ = [
     "ProductionMarketDataProvider", "ProductionSupervisorBridge", "ProviderCredentialMissing",
     "ProductionDataSymbolRecord", "ProductionDataVerification",
     "ProductionDataVerificationError", "EVIDENCE_KIND_PRODUCTION_DATA",
+    "TwelveDataRealtimeProvider", "TWELVE_DATA_API_BASE",
+    "TWELVE_DATA_CREDENTIAL_ENV", "TWELVE_DATA_PROVIDER_INTERVAL",
     "PRODUCTION_DATA_SCHEMA_VERSION", "PRODUCTION_DATA_REQUIRED_SYMBOLS",
     "ExternalReadinessArtifacts", "ProductionBootstrapError",
     "ReadOnlyBrokerAccount", "ReadOnlyBrokerObservation", "RecordedTransport", "SupervisorBridgeError",
