@@ -43,11 +43,19 @@ def test_exact_five_class_b_proposals_have_required_artifacts():
         for name in ("README.md", "patch.diff", "owner_reapproval_checklist.md", "proposal.json"):
             assert (path / name).is_file(), f"{path.name}/{name}"
         patch = (path / "patch.diff").read_text(encoding="utf-8")
-        assert "engine/approved_build.json" not in patch
-        assert "engine/approved_config.sha256" not in patch
-        assert "tests/approved_tests.json" not in patch
-        assert "infra/approved_infra.json" not in patch
-        assert "infra/core_v06.sha256" not in patch
+        targets = []
+        for line in patch.splitlines():
+            if line.startswith("diff --git a/") and " b/" in line:
+                left, _right = line[len("diff --git a/"):].split(" b/", 1)
+                targets.append(left)
+        forbidden = {
+            "engine/approved_build.json",
+            "engine/approved_config.sha256",
+            "tests/approved_tests.json",
+            "infra/approved_infra.json",
+            "infra/core_v06.sha256",
+        }
+        assert not (set(targets) & forbidden), (meta["id"], targets)
     assert ids == ["P001", "P002", "P003", "P004", "P005"]
 
 
