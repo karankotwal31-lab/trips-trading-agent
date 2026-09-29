@@ -1,0 +1,26 @@
+name: Research Validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pr1-research-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Frozen Trip's safety gate
+        run: sh ./scripts/verify_all.sh
+      - name: Research tests
+        run: python research/tests/run_research_tests.py
+      - name: PR-1 scope guard
+        run: python research/tools/check_scope.py --profile pr1
