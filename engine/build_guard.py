@@ -62,6 +62,9 @@ CRITICAL_PROJECT_FILES = (
     "docs/app.js",
     "docs/assets/trips-portrait.png",
     "docs/TRIPS_CONSTITUTION.md",
+    # The owner-side signer handles the private trust root. A modified copy could sign a different
+    # artifact or mishandle key material, so the reviewed signer is part of executable integrity.
+    "scripts/sign_owner_artifact.py",
 )
 
 
