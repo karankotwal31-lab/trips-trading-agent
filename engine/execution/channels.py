@@ -286,6 +286,10 @@ def normalize_upstox_order_status(payload: Mapping[str, Any]) -> Optional[Mappin
             "client_order_id": str(data.get("tag") or "")}
 
 
+#: Upstox order states that mean the order has finished. Everything else is still working.
+_UPSTOX_TERMINAL_STATES = frozenset({"COMPLETE", "CANCELLED", "REJECTED", "FAILED", "TIMEOUT"})
+
+
 def _upstox_state(raw: str) -> str:
     mapping = {"NEW": "SUBMITTED", "ACKNOWLEDGED": "BROKER_ACKNOWLEDGED",
                "OPEN": "BROKER_ACKNOWLEDGED", "COMPLETE": "FILLED",
@@ -311,6 +315,34 @@ class _LiveBrokerChannel(BrokerChannel):
 
     broker_id = "abstract"
     environment = "live"
+    #: Set once the broker has named its account. Never taken from a caller.
+    _verified_account_id: Optional[str] = None
+
+    def _resolved_account_id(self) -> str:
+        """The account this channel is actually talking to, as the broker reports it.
+
+        A channel has no account id of its own - it inherits one from whoever constructed it, or
+        from nothing at all. Binding a permit against a locally-held value would therefore compare
+        the permit against an empty string and refuse every legitimate mutation while proving
+        nothing. The only trustworthy identity is the one the broker itself returns, so it is read
+        once and cached. A broker that will not name its account cannot be mutated at all.
+        """
+        cached = getattr(self, "_verified_account_id", None)
+        if cached:
+            return str(cached)
+        try:
+            account = self.account()
+        except Exception as exc:
+            raise MutationWithoutPermit(
+                f"the {self.broker_id} channel could not establish which account it is talking to "
+                f"({type(exc).__name__}); refusing to mutate an unidentified account") from None
+        account_id = str(getattr(account, "account_id", "") or "").strip()
+        if not account_id:
+            raise MutationWithoutPermit(
+                f"the {self.broker_id} channel returned no account identity; refusing to mutate an "
+                f"unidentified account")
+        self._verified_account_id = account_id
+        return account_id
 
     def _authorize_mutation(self, permit: Optional[LiveMutationPermit]) -> None:
         if permit is None:
@@ -320,8 +352,10 @@ class _LiveBrokerChannel(BrokerChannel):
                 "carry one, so they cannot trade.")
         if not isinstance(permit, LiveMutationPermit):
             raise MutationWithoutPermit("a mutation permit is required and must be typed")
-        permit.check(broker_id=self.broker_id,
-                     account_id=str(getattr(self, "_account_id", "") or ""))
+        # Read the broker's own account identity FIRST. A channel that cannot name its account
+        # fails closed before the stage is even consulted.
+        account_id = self._resolved_account_id()
+        permit.check(broker_id=self.broker_id, account_id=account_id)
 
     # -- read-only surface ------------------------------------------------
 
@@ -571,8 +605,34 @@ class UpstoxChannel(_LiveBrokerChannel):
         status = self.order_status(client_order_id="trips-conformance-probe")
         return {"probe_status_present": status is not None}
 
+    def recent_orders(self) -> Sequence[Mapping[str, Any]]:
+        """Upstox's retrieve-all, filtered to orders that have actually finished.
+
+        Upstox serves working and completed orders from one endpoint, so this is the same
+        ``_get`` as ``open_orders`` filtered to terminal states. Reporting the open-order count
+        under a "recent" name would be an observation of nothing.
+        """
+        rows = _upstox_rows(upstox_envelope(self._get("recent_orders")), what="order")
+        normalized = []
+        for row in rows:
+            state = str(row.get("status") or "").strip().upper()
+            if state not in _UPSTOX_TERMINAL_STATES:
+                continue
+            order_id = str(row.get("order_id") or "").strip()
+            if not order_id:
+                raise BrokerChannelError("upstox order row is missing its identity")
+            normalized.append({"broker_order_id": order_id,
+                               "client_order_id": str(row.get("tag") or ""),
+                               "symbol": str(row.get("tradingsymbol") or ""),
+                               "state": state,
+                               "quantity": int(_upstox_number(row.get("quantity", 0),
+                                                               field="quantity"))})
+        return tuple(normalized)
+
     def probe_recent_orders(self) -> Mapping[str, Any]:
-        return {"recent_order_count": len(self.open_orders())}
+        recent = self.recent_orders()
+        return {"recent_order_count": len(recent), "read": "retrieve-all, terminal states only",
+                "note": "counts completed and cancelled orders, not only working ones"}
 
     def probe_order_submission(self) -> Mapping[str, Any]:
         # Refuses unless mutation probes were explicitly enabled on a recorded engineering fixture.
@@ -877,6 +937,18 @@ class AlpacaChannel(_LiveBrokerChannel):
         return normalize_alpaca_order_status(
             self._get("order_status", query={"client_order_id": client_order_id}))
 
+    def recent_orders(self) -> Sequence[Mapping[str, Any]]:
+        """Alpaca's closed-orders read: filled, cancelled, expired and rejected.
+
+        A genuinely different request from ``open_orders`` - different query, different rows - so
+        the two capabilities produce two independent observations rather than one repeated.
+        """
+        return normalize_alpaca_orders(
+            self._transport.request(
+                "GET", f"{self.base_url}{ALPACA_ORDERS_PATH}?status=closed",
+                headers=self._headers)["payload"],
+            what="closed order")
+
     def submit(self, *, client_order_id: str, representation: Mapping[str, Any],
                permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
         self._authorize_mutation(permit)
@@ -957,7 +1029,9 @@ class AlpacaChannel(_LiveBrokerChannel):
             client_order_id="trips-conformance-probe") is not None}
 
     def probe_recent_orders(self) -> Mapping[str, Any]:
-        return {"recent_order_count": len(self.open_orders())}
+        recent = self.recent_orders()
+        return {"recent_order_count": len(recent), "read": "orders?status=closed",
+                "note": "counts completed and cancelled orders, not only working ones"}
 
     def probe_order_submission(self) -> Mapping[str, Any]:
         self._post("order_submission", {"symbol": "SPY", "qty": "1", "side": "buy",

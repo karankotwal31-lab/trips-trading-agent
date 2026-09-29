@@ -1026,7 +1026,10 @@ def test_duplicate_idempotency_key_is_suppressed_and_survives_restart():
 
 def test_transmission_path_is_real_and_gated_only_by_the_frozen_boundary():
     """Proves step 8 is implemented, not a placeholder, while proving it is unreachable."""
-    with isolated_store():
+    # A mutation permit is bound to an owner key id, so a LIVE_ENABLED gateway with a
+    # releasing boundary and no installed owner key must refuse rather than act as an
+    # unattributed authority. Install the synthetic key these tests need.
+    with owner_key_configured(), isolated_store():
         now = datetime.now(timezone.utc)
         blocked_order = intent()
         production, blocked_adapter = build_gateway(stage=Stage.LIVE_ENABLED)
@@ -1045,7 +1048,10 @@ def test_transmission_path_is_real_and_gated_only_by_the_frozen_boundary():
 
 
 def test_lost_response_becomes_unknown_pending_and_is_never_resubmitted():
-    with isolated_store():
+    # A mutation permit is bound to an owner key id, so a LIVE_ENABLED gateway with a
+    # releasing boundary and no installed owner key must refuse rather than act as an
+    # unattributed authority. Install the synthetic key these tests need.
+    with owner_key_configured(), isolated_store():
         now = datetime.now(timezone.utc)
         order = intent()
         adapter = FakeAdapter(submit_exception=TimeoutError("response lost"))
@@ -1060,7 +1066,10 @@ def test_lost_response_becomes_unknown_pending_and_is_never_resubmitted():
 
 
 def test_resolve_unknown_requires_broker_evidence_and_never_infers_rejection():
-    with isolated_store():
+    # A mutation permit is bound to an owner key id, so a LIVE_ENABLED gateway with a
+    # releasing boundary and no installed owner key must refuse rather than act as an
+    # unattributed authority. Install the synthetic key these tests need.
+    with owner_key_configured(), isolated_store():
         now = datetime.now(timezone.utc)
         order = intent()
         gateway, _ = build_gateway(adapter=FakeAdapter(submit_exception=TimeoutError("lost")),

@@ -143,7 +143,9 @@ UPSTOX_TRANSCRIPTS: Dict[str, Dict[str, Any]] = {
         {"tradingsymbol": "SBIN", "quantity": 3}]}, "status": 200},
     "GET /v3/order/retrieve-all": {"payload": {"status": "success", "data": [
         {"order_id": "rec-1", "tag": "trips-1", "tradingsymbol": "SBIN", "status": "OPEN",
-         "quantity": 2}]}, "status": 200},
+         "quantity": 2},
+        {"order_id": "rec-0", "tag": "trips-0", "tradingsymbol": "SBIN", "status": "COMPLETE",
+         "quantity": 5}]}, "status": 200},
     "GET /v3/order/status": {"payload": {"status": "success", "data": {
         "order_id": "rec-1", "tag": "trips-1", "status": "OPEN"}}, "status": 200},
     "POST /v3/order/place": {"payload": {"status": "success", "data": {"order_ids": ["rec-new"]}},
@@ -162,6 +164,14 @@ ALPACA_TRANSCRIPTS: Dict[str, Dict[str, Any]] = {
     "GET /v2/positions": {"payload": [{"symbol": "SPY", "qty": "3"}], "status": 200},
     "GET /v2/orders": {"payload": [{"id": "rec-1", "client_order_id": "trips-1", "symbol": "SPY",
                                    "status": "new", "qty": "2"}], "status": 200},
+    # A genuinely different read: the closed-orders query, which returns a different row set. The
+    # recorded transcripts are the FIXTURE's responsibility to distinguish these, otherwise the
+    # open-orders and recent-orders capabilities would resolve from one observation.
+    "GET /v2/orders?status=closed": {"payload": [
+        {"id": "rec-0", "client_order_id": "trips-0", "symbol": "SPY", "status": "filled",
+         "qty": "5"},
+        {"id": "rec-c", "client_order_id": "trips-c", "symbol": "QQQ", "status": "canceled",
+         "qty": "1"}], "status": 200},
     "POST /v2/orders": {"payload": {"id": "rec-new", "client_order_id": "trips-1", "status": "accepted",
                                     "symbol": "SPY", "qty": "1"}, "status": 200},
     "GET /v2/orders?client_order_id=trips-conformance-probe": {

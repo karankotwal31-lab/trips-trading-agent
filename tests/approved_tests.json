@@ -9,12 +9,12 @@
     "tests/suite_integrity.py": "d2c5a0b363e6a8642da3ec3cecf8ed9e00037594c4c7793f90b06a5d19a92f7d",
     "tests/test_engine.py": "cd524411a706cd49152b037222cd58e063e41e91a96bf4825cbfd9afc43f18a6",
     "tests/test_execution_evidence.py": "a1a32bee0d457293f37fd49006fa3cc7a0da7df6b8893c5616dc7c613d6d3de4",
-    "tests/test_execution_layer.py": "3602547c1ffead8570acdccbd6d2d86abd22f52816139e1c7ea085e80df0462e",
+    "tests/test_execution_layer.py": "64ecee888806a884259f861211942f6568b0e8248afc2b28ceb038f3f7744c2d",
     "tests/test_live_gate_amendment.py": "f39a3bd5eb6d7f423c10ecab29f16b6021f46eb4e6374b990eab883c3f5caf8c",
-    "tests/test_live_readiness.py": "c378f67b160a449d1bbd94cf275f5cc59cae42082b21d7d0bd34f163d3e0eea6",
+    "tests/test_live_readiness.py": "674c7a1ffe35c5439ab1d66f4102474d205872e4826a2c47b05d8409240887a7",
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3"
   },
-  "manifest_hash": "014102e82173a4523b7a4c9be5d19e1096ef4e7c46edfe5d0be4bcb5f2119b0f",
+  "manifest_hash": "9ab206e9b6b8b6891ce63b5523eaa2f79f8a8e82ea5a181c6916fd3295cc77a3",
   "schema_version": 1
 }
