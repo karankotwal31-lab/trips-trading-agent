@@ -423,8 +423,14 @@ def verify_production_market_data(
                 secondary, symbol, s_bars, max_age_minutes=capability_max_age_minutes,
                 min_bars=min_bars, allow_synthetic_analysis=False)
 
-            guard.admit(primary.source_record(), purpose=DataPurpose.TRADE_ELIGIBILITY)
-            guard.admit(secondary.source_record(), purpose=DataPurpose.TRADE_ELIGIBILITY)
+            guard.admit(DataSourceRecord(
+                source=p_name, source_family=p_family, origin="market_data_provider",
+                approved_for_truth=bool(p_verdict.trusted_for_analysis)),
+                purpose=DataPurpose.TRADE_ELIGIBILITY)
+            guard.admit(DataSourceRecord(
+                source=s_name, source_family=s_family, origin="market_data_provider",
+                approved_for_truth=bool(s_verdict.trusted_for_analysis)),
+                purpose=DataPurpose.TRADE_ELIGIBILITY)
             cross = cross_validate(
                 p_verdict, p_bars, s_verdict, s_bars,
                 max_ohlc_deviation_pct=0.005,
