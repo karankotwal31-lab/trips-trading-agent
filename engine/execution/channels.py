@@ -1078,7 +1078,7 @@ def _alpaca_state(raw: str) -> str:
 class LiveAccountReadOnlyView:
     """The ONLY surface readiness verification ever sees.
 
-    It wraps a real channel and exposes the ten reads - and nothing else. No ``submit``, no
+    It wraps a real channel and exposes the nine broker/account reads - and nothing else. No ``submit``, no
     ``cancel``, no ``replace``. Handing this object to a verifier means the verifier structurally
     cannot mutate the account it is inspecting, which is what makes "read-only before
     LIVE_ENABLED" a property of the code rather than a promise in a comment.
@@ -1121,9 +1121,6 @@ class LiveAccountReadOnlyView:
 
     def probe_error_behaviour(self) -> Mapping[str, Any]:
         return self._channel.probe_error_behaviour()
-
-    def market_data_entitlement(self) -> Mapping[str, Any]:
-        return self._channel.market_data_entitlement()
 
 
 def _clock_skew_seconds(headers: Mapping[str, Any]) -> float:
