@@ -15,6 +15,14 @@ PROFILES = {
         "prefixes": ("research/",),
         "exact": (".github/workflows/research-validation.yml",),
     },
+    "pr2": {
+        "prefixes": ("research/shadow/", "deploy/shadow/"),
+        "exact": (
+            ".github/workflows/research-validation.yml",
+            "research/tools/check_scope.py",
+            "research/tests/test_shadow_runner.py",
+        ),
+    },
 }
 
 
