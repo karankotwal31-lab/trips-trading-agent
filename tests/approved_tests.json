@@ -16,8 +16,8 @@
     "tests/test_student_engine.py": "7569c9b2494fd9becd404a1ba838dc728ae0a7298ad2b058b723479981fe1a7b",
     "tests/test_student_integration.py": "161c0c746d10ddf2d59171dfa7163d23a1b98bcaa303f272afb53010c9a0d9b3",
     "tests/test_task_safety_kernel.py": "63371913e063e0db53066ce342c6f6311a72e87b2dc117aa45bbd57eb79e98bc",
-    "tests/test_production_bootstrap.py": "d406b398af1381cada8575f074edc60301c2cbefdf1ca1049a122c36e4e3f9ab"
+    "tests/test_production_bootstrap.py": "6320b2d10e06831a2b9593de91c7545e55e20a7c4cae195e099e15273adfb2a1"
   },
-  "manifest_hash": "e79a48fae4538aa7a89a9e4488ecf279bc6e7fc4d50446840eba32b70bbe6ed4",
+  "manifest_hash": "d32e0e4b226b82cc61bce308acbc8db2f8a1d3333519b29deeaa506864c805c8",
   "schema_version": 1
 }
