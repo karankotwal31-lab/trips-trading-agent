@@ -1,4 +1,4 @@
-# Trip's Infrastructure Status — v0.7 Neon Cloud Paper Shell
+# Trip's Infrastructure Status — v0.7 Neon Cloud Shell
 
 ## Frozen core
 
@@ -13,7 +13,7 @@ Trip's v0.6 trading/safety core remains unchanged. `infra/core_v06.sha256` verif
 - Authoritative runtime: initialized
 - Runtime cloud version: **1**
 - Runtime SHA-256: `be71acbd0c101daa91218d9fa8e1bd9966bd01d62020d5c1fdca7544985d6d2b`
-- Initial paper equity: **100000.0 simulated**
+- Initial equity on the hydrated runtime: **100000.0 simulated** (frozen core's own initializer; no brokerage account is involved)
 - Open positions: 0
 - Pending entries: 0
 - Market cycle executed on production state: **false**
@@ -60,8 +60,16 @@ Neon refused marking the production branch as protected because the current plan
 1. Create/expose a dedicated private GitHub repository for Trip's trading agent. The existing `trips-youtube-control` repository remains intentionally untouched.
 2. Store the restricted `NEON_DATABASE_URL` as a repository secret. The current GitHub connector does not expose repository-secret writes.
 3. Add reviewed market-data credentials (`TWELVE_DATA_API_KEY` and an independent verifier such as Alpha Vantage) as server-side secrets.
-4. Review and approve the provider/config fingerprint change from DEMO before any real-data paper cycle.
-5. Enable hourly cloud cycles and daily deep diagnostics, then verify multiple consecutive clean runs before any strategy-evidence claim.
+4. Review and approve the provider/config fingerprint change from DEMO before any real-data cycle.
+5. Enable the cloud cycle and daily deep diagnostics, then verify multiple consecutive clean runs before any strategy-evidence claim.
 6. Deploy the read-only dashboard once a safe server-side read credential can be attached.
 
-No live-money broker path is pending or enabled.
+## Execution architecture
+
+Trip's is a **live-money-only** execution system. The stage order is
+`RESEARCH -> BACKTEST -> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED`; there is no
+paper stage, no paper endpoint and no paper credential, and no runtime fallback between
+environments. The `Trips Cloud Paper Cycle` workflow is retired; its non-trading health checks
+moved to `Trips Live Readiness`, which is non-mutating by construction.
+
+No live-money broker path is pending or enabled. This build holds at `LIVE_READY_LOCKED`.

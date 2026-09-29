@@ -32,6 +32,11 @@ from execution.gate import (frozen_config_guard_permits, frozen_modes,  # noqa: 
                             frozen_risk_permitted_modes)
 from execution.lifecycle import (OWNER_BLOCKING_ITEMS, Actor, Lifecycle,  # noqa: E402
                                  Stage)
+from execution.live_path import LivePathViolation  # noqa: E402
+from execution.live_verification import READ_ONLY_CHECKS  # noqa: E402
+
+#: A fixed instant, so timestamped evidence is reproducible.
+NOW = datetime(2026, 1, 2, 15, 30, tzinfo=timezone.utc)
 from execution.owner_authority import (PURPOSE_AMENDMENT, PURPOSE_LIVE_AUTHORIZATION,  # noqa: E402
                                        key_id_for, owner_authority_status, signed_message,
                                        verify_owner_signature)
@@ -285,20 +290,40 @@ def test_no_shipped_channel_means_no_adapter_can_reach_a_broker():
 
 
 def test_endpoint_selection_is_configuration_not_authority():
-    """Selecting a live endpoint grants nothing: it changes a URL and nothing else."""
-    assert UpstoxAdapter().trade_base == "https://api-sandbox.upstox.com/v3"
+    """Selecting an endpoint grants nothing: it changes a URL and nothing else.
+
+    The live endpoint is the only one there is. A recorded fixture exists for engineering tests and
+    points at a non-routable host, so no paper or sandbox URL remains to be selected at all.
+    """
+    assert UpstoxAdapter().trade_base == "https://api-hft.upstox.com/v3"
     assert UpstoxAdapter(environment="live").trade_base == "https://api-hft.upstox.com/v3"
-    assert AlpacaAdapter().base_url == "https://paper-api.alpaca.markets"
+    assert AlpacaAdapter().base_url == "https://api.alpaca.markets"
     assert AlpacaAdapter(environment="live").base_url == "https://api.alpaca.markets"
-    for environment in ("sandbox", "live"):
+    assert UpstoxAdapter(environment="recorded").trade_base.startswith("https://recorded.invalid")
+    assert AlpacaAdapter(environment="recorded").base_url == "https://recorded.invalid"
+    for environment in ("recorded", "live"):
         matrix = UpstoxAdapter(environment=environment).capability_matrix()
         assert matrix.status("order_submission").permits_execution is False
-    for bad in ("production", "", "LIVE", "Live"):
+    for bad in ("production", "", "LIVE", "Live", "paper", "sandbox", "PAPER"):
         try:
             UpstoxAdapter(environment=bad)
             raise AssertionError(f"environment {bad!r} must be refused")
         except BrokerContractError:
             pass
+
+
+def test_no_paper_or_sandbox_url_exists_on_any_execution_route_object():
+    """Removing paper trading means the endpoints are gone, not merely unused."""
+    from execution import adapters, channels
+
+    for module in (adapters, channels):
+        published = [name for name in dir(module) if not name.startswith("_")]
+        for name in published:
+            value = getattr(module, name)
+            if not isinstance(value, str) or name.islower():
+                continue
+            assert "paper" not in value.lower(), f"{module.__name__}.{name} is a paper endpoint"
+            assert "sandbox" not in value.lower(), f"{module.__name__}.{name} is a sandbox endpoint"
 
 
 def test_the_shipped_channels_cannot_be_constructed_without_a_credential():
@@ -329,7 +354,65 @@ def test_mutation_probes_never_run_against_a_live_endpoint():
             channel_type(environment="live", allow_mutation_probes=True, **kwargs)
             raise AssertionError("mutation probes must be refused against a live endpoint")
         except BrokerChannelError as exc:
-            assert "live" in str(exc).lower()
+            assert "recorded" in str(exc).lower(), str(exc)
+
+
+def test_paper_and_sandbox_environments_cannot_be_constructed_at_all():
+    """There is no runtime fallback between environments, so the names are refused outright."""
+    from execution.channels import AlpacaChannel, BrokerChannelError, UpstoxChannel
+
+    for channel_type, kwargs in ((UpstoxChannel, {"access_token": "t"}),
+                                 (AlpacaChannel, {"api_key": "k", "api_secret": "s"})):
+        for environment in ("paper", "sandbox", "PAPER", "SANDBOX"):
+            try:
+                channel_type(environment=environment, **kwargs)
+                raise AssertionError(f"{channel_type.__name__} accepted {environment!r}")
+            except BrokerChannelError as exc:
+                assert environment.lower() in str(exc).lower() or "live" in str(exc).lower()
+
+
+def test_a_live_channel_refuses_to_submit_or_cancel_without_an_owner_permit():
+    """The first brokerage mutation may happen only after LIVE_ENABLED, under a signed permit."""
+    from execution.channels import (AlpacaChannel, LiveAccountReadOnlyView, RecordedTransport,
+                                    UpstoxChannel)
+    from execution.contracts import LiveMutationPermit, MutationWithoutPermit
+    from execution.readiness import ALPACA_TRANSCRIPTS, UPSTOX_TRANSCRIPTS
+
+    upstox = UpstoxChannel(environment="recorded", access_token="recorded",
+                           transport=RecordedTransport(dict(UPSTOX_TRANSCRIPTS)))
+    for call in (lambda: upstox.submit(client_order_id="x", representation={"quantity": 1}),
+                 lambda: upstox.cancel(broker_order_id="x", reason="y")):
+        try:
+            call()
+            raise AssertionError("an unpermitted mutation must be refused")
+        except MutationWithoutPermit:
+            pass
+    assert not [c for c in upstox._transport.calls if c["method"] in ("POST", "DELETE", "PATCH")]
+
+    # A permit for the right stage but the wrong account is refused too, so it cannot be reused.
+    permit = LiveMutationPermit(stage="LIVE_ENABLED", broker_id="upstox", account_id="OTHER",
+                                authorization_key_id="kid")
+    try:
+        upstox.submit(client_order_id="x", representation={"quantity": 1}, permit=permit)
+        raise AssertionError("a permit for another account must be refused")
+    except MutationWithoutPermit:
+        pass
+    # A permit carrying the wrong stage is refused even for the right account.
+    early = LiveMutationPermit(stage="LIVE_READY_LOCKED", broker_id="upstox", account_id="ACCT",
+                               authorization_key_id="kid")
+    try:
+        upstox.submit(client_order_id="x", representation={"quantity": 1}, permit=early)
+        raise AssertionError("a pre-LIVE_ENABLED permit must be refused")
+    except MutationWithoutPermit:
+        pass
+
+    # The read-only view has no mutating method at all, so a verifier cannot reach one.
+    view = LiveAccountReadOnlyView(AlpacaChannel(environment="recorded", api_key="r",
+                                                 api_secret="r",
+                                                 transport=RecordedTransport(
+                                                     dict(ALPACA_TRANSCRIPTS))))
+    assert not [name for name in dir(view)
+                if any(verb in name for verb in ("submit", "cancel", "place", "replace", "modify"))]
 
 
 # ---------------------------------------------------------------------------
@@ -458,10 +541,233 @@ def test_live_enabled_stays_owner_only_even_from_the_readiness_stage():
 def test_the_ceiling_is_not_self_promoting():
     """LIVE_READY_LOCKED must not be reachable from a stage that has not earned it."""
     assert Stage.RESEARCH not in [Stage.LIVE_READY_LOCKED]
-    for start in (Stage.RESEARCH, Stage.BACKTEST, Stage.SHADOW, Stage.PAPER):
+    for start in (Stage.RESEARCH, Stage.BACKTEST, Stage.SHADOW):
         outcome = Lifecycle(start).advance(Stage.LIVE_READY_LOCKED, actor=Actor.OWNER)
         assert outcome["advanced"] is False
         assert outcome["code"] == "PROMOTION_REFUSED_ILLEGAL_TRANSITION"
+
+
+# ---------------------------------------------------------------------------
+# LIVE-MONEY-ONLY: no paper stage, one canonical path, read-only verification
+# ---------------------------------------------------------------------------
+
+
+def test_there_is_no_paper_stage_and_the_order_is_exactly_as_mandated():
+    """The stage order is data, and PAPER is absent by design rather than by omission."""
+    from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS, STAGE_ORDER
+
+    assert [stage.value for stage in STAGE_ORDER] == [
+        "RESEARCH", "BACKTEST", "SHADOW", "LIVE_LOCKED", "LIVE_READY_LOCKED", "LIVE_ENABLED"]
+    assert not hasattr(Stage, "PAPER")
+    assert "PAPER" not in {stage.value for stage in STAGE_ORDER}
+    assert all(Stage.SHADOW not in () for _ in ())  # no paper waypoint exists to be skipped
+    # No transition routes through a paper stage, and the two that exist are the whole story.
+    from execution.lifecycle import ALLOWED_TRANSITIONS
+
+    assert ALLOWED_TRANSITIONS[Stage.SHADOW] == (Stage.LIVE_LOCKED,)
+    assert Stage.LIVE_LOCKED in ALLOWED_TRANSITIONS[Stage.SHADOW]
+    # And LIVE_ENABLED still requires all eleven named things, none of them a paper prerequisite.
+    assert len(LIVE_ENABLED_REQUIREMENTS) == 11
+    for requirement in LIVE_ENABLED_REQUIREMENTS:
+        assert "paper" not in requirement and "sandbox" not in requirement
+
+
+def test_live_enabled_requires_exactly_the_mandated_eleven_requirements():
+    from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS
+
+    assert set(LIVE_ENABLED_REQUIREMENTS) == {
+        "pinned_ed25519_owner_trust_root",
+        "owner_signed_capital_governor_profile",
+        "approved_constitutional_amendment_covering_all_three_frozen_blockers",
+        "exact_approved_build_and_config_identities",
+        "owner_signed_live_authorization",
+        "verified_real_live_broker_account",
+        "verified_live_market_data",
+        "clean_reconciliation",
+        "healthy_truth_risk_capital_and_constitution_gates",
+        "no_halt",
+        "no_unresolved_order_ambiguity",
+    }
+
+
+def test_the_canonical_live_path_is_exactly_as_mandated_and_in_order():
+    from execution.live_path import (CANONICAL_LIVE_PATH, TRANSMISSION_POINT, assert_canonical_live_route,
+                                     path_index)
+
+    assert CANONICAL_LIVE_PATH == (
+        "live_market_data", "truth", "strategy", "risk", "capital_governor", "constitution",
+        "immutable_execution_intent", "execution_authority_gate", "universal_broker_gateway",
+        "verified_live_broker_adapter", "live_broker_account", "real_broker_execution",
+        "reconciliation")
+    assert assert_canonical_live_route()["canonical"] is True
+    # The gateway is the transmission point, and it sits after every read-only stage.
+    assert path_index(TRANSMISSION_POINT) > path_index("execution_authority_gate")
+    assert path_index(TRANSMISSION_POINT) < path_index("real_broker_execution")
+    # Anything reordered, dropped or inserted is a violation, not a variant.
+    for broken in (CANONICAL_LIVE_PATH[:-1], tuple(reversed(CANONICAL_LIVE_PATH)),
+                   CANONICAL_LIVE_PATH + ("extra_stage",),
+                   ("live_market_data", "live_broker_account", "truth")):
+        try:
+            assert_canonical_live_route(broken)
+            raise AssertionError(f"{broken} must be refused as non-canonical")
+        except LivePathViolation:
+            pass
+
+
+def test_no_non_live_environment_is_permitted_anywhere_on_the_route():
+    from execution.live_path import assert_no_non_live_environment
+
+    assert assert_no_non_live_environment(
+        market_data_source_kind="live", broker_environment="live",
+        broker_account_environment="live")["canonical"] is True
+    for kwargs in ({"broker_environment": "paper"}, {"broker_environment": "sandbox"},
+                   {"broker_environment": "PAPER"}, {"broker_account_environment": "sandbox"},
+                   {"market_data_source_kind": "demo"}, {"market_data_source_kind": "delayed"},
+                   {"market_data_source_kind": "simulated"}):
+        try:
+            assert_no_non_live_environment(**kwargs)
+            raise AssertionError(f"{kwargs} must be refused on a live-money-only route")
+        except LivePathViolation:
+            pass
+
+
+def test_the_first_mutation_may_happen_only_at_live_enabled_and_under_a_permit():
+    from execution.contracts import MUTATION_REQUIRES_STAGE
+    from execution.live_path import mutation_stage
+
+    assert MUTATION_REQUIRES_STAGE == "LIVE_ENABLED"
+    assert mutation_stage() == "LIVE_ENABLED"
+    from execution.lifecycle import Stage
+
+    assert Stage.LIVE_ENABLED.value == MUTATION_REQUIRES_STAGE
+    for stage in (Stage.RESEARCH, Stage.BACKTEST, Stage.SHADOW, Stage.LIVE_LOCKED,
+                  Stage.LIVE_READY_LOCKED):
+        assert stage.value != MUTATION_REQUIRES_STAGE
+
+
+def test_the_gateway_mints_the_permit_immediately_before_the_only_transmission():
+    """The first brokerage mutation happens in the gateway, and nowhere else."""
+    import inspect
+
+    from execution import gateway
+
+    source = inspect.getsource(gateway.UniversalBrokerGateway.submit)
+    body = source.split("\n")
+    mint = next(index for index, line in enumerate(body) if "LiveMutationPermit(" in line)
+    call = next(index for index, line in enumerate(body) if "submit_order(" in line)
+    assert mint < call, "the permit must exist before the order is transmitted"
+    # ... and the gate verdict must already have been consulted.
+    assert any("may_transmit_live" in line for line in body)
+    # The permit is never a caller argument.
+    signature = inspect.signature(gateway.UniversalBrokerGateway.submit)
+    assert "permit" not in signature.parameters
+
+
+def test_the_twelve_read_only_checks_run_without_submitting_anything():
+    from execution.live_verification import (REQUIRED_INSTRUMENTS, LiveReadOnlyBrokerVerifier,
+                                             LiveReadOnlyVerification)
+
+    assert len(READ_ONLY_CHECKS) == 12
+    assert READ_ONLY_CHECKS == (
+        "authenticate_legitimately", "verify_broker_identity", "verify_exact_account",
+        "verify_us_equity_permissions", "verify_required_instruments_available",
+        "retrieve_balances", "retrieve_positions", "retrieve_open_and_recent_orders",
+        "verify_broker_clock", "verify_account_restrictions",
+        "verify_rate_limit_and_error_behaviour", "verify_live_market_data_entitlement")
+    assert REQUIRED_INSTRUMENTS == ("SPY", "QQQ", "AAPL")
+    # The verifier has no submit, no cancel and no replace of its own.
+    assert not [name for name in dir(LiveReadOnlyBrokerVerifier)
+                if any(verb in name for verb in ("submit", "cancel", "place", "replace",
+                                                "modify", "close_order"))]
+
+
+def test_read_only_verification_is_refused_for_any_non_live_environment():
+    from execution.live_verification import LiveReadOnlyVerification, LiveVerificationError
+
+    for environment in ("recorded", "paper", "sandbox", ""):
+        try:
+            LiveReadOnlyVerification(broker_id="b", account_id="A", environment=environment,
+                                     generated_at=NOW.isoformat())
+            raise AssertionError(f"environment {environment!r} must be refused")
+        except LiveVerificationError as exc:
+            assert "live" in str(exc).lower()
+    ok = LiveReadOnlyVerification(broker_id="b", account_id="A", environment="live",
+                                  generated_at=NOW.isoformat())
+    assert ok.verified is False, "no checks run means unverified, not verified"
+    assert ok.missing_checks == READ_ONLY_CHECKS
+    assert ok.to_dict()["releases_capital"] is False
+
+
+def test_the_two_evidence_kinds_are_distinct_and_neither_releases_capital():
+    from execution.live_verification import EVIDENCE_KIND_LIVE_READ_ONLY, EVIDENCE_KIND_RECORDED
+
+    assert EVIDENCE_KIND_RECORDED == "RECORDED_CONTRACT_CONFORMANCE"
+    assert EVIDENCE_KIND_LIVE_READ_ONLY == "LIVE_READ_ONLY_BROKER_VERIFICATION"
+    assert EVIDENCE_KIND_RECORDED != EVIDENCE_KIND_LIVE_READ_ONLY
+    # A recorded conformance document is stamped as recorded, and resolves to UNVERIFIED when
+    # asked about the live environment.
+    from execution.contracts import CapabilityStatus
+    from execution.readiness import collect_evidence
+
+    _, conformance = collect_evidence()
+    for broker_id, document in conformance.items():
+        assert document.to_dict()["evidence_kind"] == EVIDENCE_KIND_RECORDED
+        for capability in document.records:
+            # Never SUPPORTED. A recorded proof is not a live proof; a recorded proven negative
+            # survives as a negative, which also fails closed.
+            assert document.status(capability, environment="live") is not CapabilityStatus.SUPPORTED
+        assert document.mandate_verdict(["SPY", "QQQ", "AAPL"],
+                                        environment="live")["permitted"] is False
+        assert broker_id
+
+
+def test_the_readiness_report_is_honest_and_releases_nothing():
+    from execution.readiness import live_readiness_report
+
+    report = live_readiness_report()
+    assert report["reached_live_enabled"] is False
+    assert report["paper_stage_present"] is False
+    assert report["releases_capital"] is False
+    assert report["live_broker_verification"]["status"] == "NOT_VERIFIED"
+    assert report["live_broker_verification"]["submits_no_order"] is True
+    assert report["stage_order"] == ["RESEARCH", "BACKTEST", "SHADOW", "LIVE_LOCKED",
+                                    "LIVE_READY_LOCKED", "LIVE_ENABLED"]
+
+
+def test_autonomy_may_only_tighten_the_owner_signed_governor_profile():
+    """After activation, valid decisions execute without per-order approval - inside the limits."""
+    from execution.live_path import assert_no_autonomous_authority_increase
+
+    ceilings = {"max_order_notional": 5000.0, "max_position_notional": 20000.0}
+    signed = {"max_order_notional": 4000.0, "max_position_notional": 20000.0}
+    assert assert_no_autonomous_authority_increase(signed, signed, ceilings)["may_only_tighten"]
+    # Tightening itself is always allowed.
+    assert assert_no_autonomous_authority_increase(
+        signed, {"max_order_notional": 1000.0, "max_position_notional": 5000.0}, ceilings)
+    for raised in ({"max_order_notional": 6000.0, "max_position_notional": 20000.0},
+                   {"max_order_notional": 4000.0, "max_position_notional": 25000.0}):
+        try:
+            assert_no_autonomous_authority_increase(signed, raised, ceilings)
+            raise AssertionError("an autonomous increase in authority must be refused")
+        except LivePathViolation:
+            pass
+
+
+def test_no_execution_module_names_a_paper_or_sandbox_prerequisite():
+    """The requirement is removed from the code, not merely deprioritised."""
+    from pathlib import Path
+
+    import execution
+
+    root = Path(execution.__file__).parent
+    offenders = []
+    for path in sorted(root.glob("*.py")):
+        text = path.read_text()
+        for needle in ("paper_conformance", "sandbox_conformance", "paper_order_lifecycle",
+                       "sandbox_order_lifecycle"):
+            if needle in text:
+                offenders.append(f"{path.name}: {needle}")
+    assert offenders == []
 
 
 if __name__ == "__main__":

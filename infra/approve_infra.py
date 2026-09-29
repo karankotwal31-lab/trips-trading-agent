@@ -10,7 +10,10 @@ FILES = (
     "infra/neon_schema.sql",
     "infra/requirements-cloud.txt",
     "infra/core_v06.sha256",
-    ".github/workflows/trips-cloud-paper.yml",
+    # `trips-cloud-paper.yml` was retired when paper trading left the architecture. Its two
+    # non-trading health checks - infrastructure manifest verification and frozen-core hash
+    # verification - now live in `trips-live-readiness.yml`, which performs no trading of any kind.
+    ".github/workflows/trips-live-readiness.yml",
     ".github/workflows/trips-daily-deep.yml",
 )
 files = {n: hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in FILES}

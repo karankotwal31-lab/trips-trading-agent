@@ -1,0 +1,89 @@
+name: Trips Live Readiness
+
+# NON-MUTATING BY CONSTRUCTION.
+#
+# Trip's is a live-money-only execution system. There is no paper stage, no paper endpoint and no
+# paper credential, and this workflow therefore does not trade at all - not even against a broker's
+# simulated environment. It performs only local, non-mutating validation:
+#
+#   * the frozen v0.6 core still hashes byte-for-byte to infra/core_v06.sha256;
+#   * the infrastructure manifest still matches what an owner approved;
+#   * the full safety gate passes (tests, suite integrity, build manifest);
+#   * the live-readiness report runs, and it can only ever report NOT_VERIFIED for the
+#     LIVE_READ_ONLY_BROKER_VERIFICATION that needs a real account.
+#
+# Broker validation before LIVE_ENABLED is READ-ONLY against the real live account and is an owner
+# act: it needs credentials this repository does not and must not hold. No live order may be
+# submitted merely as a CI test, so nothing here can.
+#
+# This replaces `Trips Cloud Paper Cycle`, whose hourly runs failed for want of a database secret
+# and whose trading steps are no longer a concept. The non-trading health checks it performed - infra
+# manifest verification and frozen-core hash verification - are carried over here.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Off the hour, and daily. A readiness report that is only ever computed on a human's push is
+    # not a health check.
+    - cron: "37 7 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trips-live-readiness
+  cancel-in-progress: false
+
+jobs:
+  live-readiness:
+    name: Non-mutating live-readiness validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Verify frozen v0.6 core hashes
+        run: sha256sum -c infra/core_v06.sha256
+
+      - name: Install cloud adapter dependencies
+        run: python -m pip install -r infra/requirements-cloud.txt
+
+      - name: Verify infrastructure manifest
+        run: python infra/verify_infra.py
+
+      - name: Run Trip's safety gate
+        run: sh ./scripts/verify_all.sh
+
+      - name: Live-readiness report (read-only, submits no order)
+        run: PYTHONPATH=engine python -m execution.status > readiness.json
+
+      - name: Assert the report is honest about not being live-enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          with open("readiness.json") as handle:
+              report = json.load(handle)
+          problems = []
+          if report.get("lifecycle_stage") == "LIVE_ENABLED":
+              problems.append("CI must never observe LIVE_ENABLED")
+          if report.get("live_transmission", {}).get("permitted") is not False:
+              problems.append("CI must never observe permitted live transmission")
+          if not report.get("frozen_core_digest_verified"):
+              problems.append("the frozen core digest did not verify")
+          print(json.dumps({
+              "lifecycle_stage": report.get("lifecycle_stage"),
+              "live_transmission_permitted": report.get("live_transmission", {}).get("permitted"),
+              "frozen_core_digest_verified": report.get("frozen_core_digest_verified"),
+              "live_read_only_broker_verification":
+                  report.get("live_readiness", {}).get("live_read_only_broker_verification"),
+          }, indent=2))
+          if problems:
+              raise SystemExit("; ".join(problems))
+          PY

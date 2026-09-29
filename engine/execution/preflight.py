@@ -39,6 +39,8 @@ from truth_guard import apply_cross_source_verification, cross_validate, validat
 
 from .contracts import approved_symbol_scope, canonical_json
 from .identity import authorization_drift, current_identity
+from .live_path import (LivePathViolation, assert_no_forbidden_trading_environment,
+                        assert_no_non_live_environment)
 from .registry import AdapterRegistry
 from .session import SessionCalendar, SessionStatus
 
@@ -378,6 +380,20 @@ class PreflightEvaluator:
         add("correct_environment", environment_matches,
             broker_error or f"broker environment {getattr(account, 'environment', None)!r} "
                             f"vs expected {self.expected_environment!r}")
+
+        # The canonical live route is LIVE end to end. A demo feed, a delayed feed, a paper
+        # endpoint or a sandbox account is not a degraded version of live trading - it is a
+        # different system, and there is no runtime fallback between them.
+        try:
+            route = assert_no_forbidden_trading_environment(
+                getattr(adapter, "environment", ""), getattr(account, "environment", ""),
+                self.expected_environment)
+            environment_matches = environment_matches and bool(route["canonical"])
+            artifacts["canonical_live_route"] = route
+        except LivePathViolation as exc:
+            environment_matches = False
+            artifacts["canonical_live_route"] = {"canonical": False, "violation": str(exc)}
+            checks[-1]["detail"] = str(exc)
 
         add("healthy_authentication",
             broker_error is None and bool(getattr(health, "authenticated", False)),

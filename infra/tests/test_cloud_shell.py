@@ -115,11 +115,29 @@ def test_oversized_cloud_payload_fails_closed():
         pass
 
 
-def test_workflow_requires_neon_secret_and_cloud_dependency():
-    text=(ROOT/".github/workflows/trips-cloud-paper.yml").read_text()
-    assert "NEON_DATABASE_URL" in text
+def test_the_paper_cycle_workflow_is_retired():
+    """Paper trading left the architecture, so its workflow is gone rather than merely renamed."""
+    assert not (ROOT/".github/workflows/trips-cloud-paper.yml").exists()
+
+
+def test_live_readiness_workflow_performs_only_non_mutating_validation():
+    """The replacement carries the old health checks forward and adds no trading step.
+
+    Retiring a workflow must not retire its verification coverage. The frozen-core hash check and
+    the infrastructure manifest check are both still here - and no step may reach a brokerage
+    account, because a live order submitted as a CI test is a real order.
+    """
+    text=(ROOT/".github/workflows/trips-live-readiness.yml").read_text()
+    # The two health checks the retired workflow performed, preserved.
+    assert "sha256sum -c infra/core_v06.sha256" in text
+    assert "python infra/verify_infra.py" in text
     assert "requirements-cloud.txt" in text
-    assert "SUPABASE_SERVICE_ROLE_KEY" not in text
+    # Nothing that could touch a broker or its credentials.
+    for forbidden in ("NEON_DATABASE_URL", "UPSTOX", "ALPACA", "TWELVE_DATA_API_KEY",
+                      "ALPHA_VANTAGE_API_KEY", "cloud_cycle.py", "SUPABASE_SERVICE_ROLE_KEY"):
+        assert forbidden not in text, f"{forbidden} must not appear in a non-trading workflow"
+    # It re-runs the safety gate rather than a narrower subset of it.
+    assert "scripts/verify_all.sh" in text
 
 
 def test_neon_client_redacts_database_url_from_errors():

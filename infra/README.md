@@ -1,6 +1,11 @@
-# Trip's v0.7 Cloud Paper Shell — Neon transport
+# Trip's v0.7 Cloud Shell — Neon transport
 
 This directory is an **infrastructure wrapper around the frozen Trip's v0.6 core**. It does not alter trading logic, the Constitution, Truth Layer, Forge Gate, risk engine, execution simulator, Guardian, Evolution Lab, Decision Mirror, or Supervisor Counsel.
+
+Note on naming: this shell hydrates the frozen cycle and commits its state to Neon. It is not a
+paper trading environment. Trip's is live-money-only, and the former `Trips Cloud Paper Cycle`
+workflow has been retired — see `.github/workflows/trips-live-readiness.yml`, which performs only
+non-mutating validation.
 
 ## Safety model
 
@@ -21,8 +26,12 @@ This directory is an **infrastructure wrapper around the frozen Trip's v0.6 core
 2. Apply the reviewed migration to the dedicated Trip's Neon project only after explicit approval.
 3. Create a restricted PostgreSQL LOGIN and grant only `trips_runtime_exec`.
 4. Add its TLS database URL as GitHub secret `NEON_DATABASE_URL`.
-5. Run the `Trips Cloud Paper Cycle` workflow manually with `bootstrap` exactly once.
+5. Run the bootstrap path manually exactly once, against a reviewed branch, before any scheduled cycle.
 6. Keep engine config in DEMO mode until market-data credentials and entitlement checks are separately reviewed.
 7. Verify multiple consecutive scheduled cycles before enabling any new provider configuration.
+
+The hourly `Trips Cloud Paper Cycle` workflow is retired. Its two non-trading health checks —
+infrastructure manifest verification and frozen-core hash verification — are now performed by
+`Trips Live Readiness`, which also re-runs the full safety gate. Neither workflow trades.
 
 The dashboard remains read-only. The database credential must never be exposed in browser JavaScript or public deployment variables.

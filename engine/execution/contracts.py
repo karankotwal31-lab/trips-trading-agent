@@ -51,6 +51,54 @@ class MandateIncompatible(ExecutionLayerError):
     """A broker is not permitted to execute under this deployment's instrument mandate."""
 
 
+class MutationWithoutPermit(ExecutionLayerError):
+    """Something tried to change a brokerage account without owner-signed authority to do so."""
+
+
+#: The only stage at which a brokerage account may be mutated. Everything before this - including
+#: broker readiness verification - is strictly non-mutating by construction, not by policy.
+MUTATION_REQUIRES_STAGE = "LIVE_ENABLED"
+
+
+@dataclass(frozen=True)
+class LiveMutationPermit:
+    """The one artifact that lets a channel place or cancel a REAL order.
+
+    Readiness verification, conformance runs, reconciliation and every read path operate without
+    this object, so none of them can mutate an account even by mistake. It is minted by the gateway
+    only after ``Lifecycle.may_transmit_live()`` has permitted, which requires the frozen boundary to
+    release, the stage to be ``LIVE_ENABLED``, and a verified owner-signed release basis - never a
+    caller-asserted core state.
+
+    It is bound to one broker and one account. A permit for the right stage but the wrong account is
+    refused, so a permit cannot be widened by reuse.
+    """
+
+    stage: str
+    broker_id: str
+    account_id: str
+    authorization_key_id: str
+
+    def __post_init__(self) -> None:
+        for name in ("stage", "broker_id", "account_id", "authorization_key_id"):
+            if not str(getattr(self, name)).strip():
+                raise MutationWithoutPermit(f"a mutation permit requires {name}")
+
+    def check(self, *, broker_id: str, account_id: str) -> None:
+        """Raise unless this permit authorises mutating THIS broker's THIS account."""
+        if self.stage != MUTATION_REQUIRES_STAGE:
+            raise MutationWithoutPermit(
+                f"a brokerage account may only be mutated at stage {MUTATION_REQUIRES_STAGE}; "
+                f"this permit carries {self.stage!r}")
+        if str(broker_id) != self.broker_id or str(account_id) != self.account_id:
+            raise MutationWithoutPermit(
+                "a mutation permit is bound to one broker account and may not be reused for another")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"stage": self.stage, "broker_id": self.broker_id,
+                "account_id": self.account_id, "authorization_key_id": self.authorization_key_id}
+
+
 class IntentExpired(IntentError):
     """The intent's validity boundary has passed. Never extended automatically."""
 

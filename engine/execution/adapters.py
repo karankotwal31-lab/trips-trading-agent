@@ -29,6 +29,12 @@ Deliberately **not** ported:
 These adapters build and validate requests and interpret responses. They hold **no transport**: the
 transport is injected, so shipping this module ships no network capability and no credentials.
 Without an injected transport and configured credentials an adapter cannot submit, and it says so.
+
+There is no paper or sandbox environment on any of these adapters. Trip's is a live-money-only
+execution system; the only environments are ``live`` (the real brokerage endpoint, and the only one
+on the execution route) and ``recorded`` (an engineering fixture with no endpoint and no account).
+Changing an environment is not a fallback: it is a different object, chosen at construction, and
+nothing here can switch one at runtime.
 """
 
 from __future__ import annotations
@@ -40,18 +46,19 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .contracts import (CORE_CAPABILITIES, BrokerAccount, BrokerAdapter, BrokerHealth,
                         BrokerPosition, CapabilityMatrix, CapabilityStatus, EconomicRepresentation,
-                        ExecutionState, OrderCapabilities, canonical_json,
+                        ExecutionState, LiveMutationPermit, OrderCapabilities, canonical_json,
                         canonical_economic_representation)
 
 #: A broker-side order tag is a fixed-width field. Silently truncating an idempotency key would
 #: destroy deduplication, so the bound is enforced rather than adapted around.
 MAX_TAG_LENGTH = 40
 
+#: A non-routable host for recorded (engineering-fixture) channels. Never contacted.
+RECORDED_BASE = "https://recorded.invalid"
+
 UPSTOX_LIVE_TRADE_BASE = "https://api-hft.upstox.com/v3"
-UPSTOX_SANDBOX_TRADE_BASE = "https://api-sandbox.upstox.com/v3"
 UPSTOX_DATA_BASE = "https://api.upstox.com"
 ALPACA_LIVE_BASE = "https://api.alpaca.markets"
-ALPACA_PAPER_BASE = "https://paper-api.alpaca.markets"
 
 
 class BrokerContractError(Exception):
@@ -217,9 +224,10 @@ class _ChannelInjectedAdapter(BrokerAdapter):
                 "a broker. It can validate and translate, but it cannot submit")
         return self._channel
 
-    def submit_order(self, *, client_order_id: str, representation: Mapping[str, Any]) -> Mapping[str, Any]:
+    def submit_order(self, *, client_order_id: str, representation: Mapping[str, Any],
+                     permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
         return self._require_channel().submit(client_order_id=client_order_id,
-                                              representation=representation)
+                                              representation=representation, permit=permit)
 
     def account(self) -> BrokerAccount:
         return self._require_channel().account()
@@ -233,29 +241,33 @@ class _ChannelInjectedAdapter(BrokerAdapter):
     def order_status(self, *, client_order_id: str) -> Optional[Mapping[str, Any]]:
         return self._require_channel().order_status(client_order_id=client_order_id)
 
-    def cancel_order(self, *, broker_order_id: str, reason: str) -> Mapping[str, Any]:
-        return self._require_channel().cancel(broker_order_id=broker_order_id, reason=reason)
+    def cancel_order(self, *, broker_order_id: str, reason: str,
+                     permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        return self._require_channel().cancel(broker_order_id=broker_order_id, reason=reason,
+                                              permit=permit)
 
 
 class UpstoxAdapter(_ChannelInjectedAdapter):
-    """Upstox V3 adapter. Sandbox by default; the live base must be selected explicitly.
+    """Upstox V3 adapter, pointed at the LIVE trade endpoint.
 
-    Environment selection is a configuration value, not an authority. Whether capital may move is
-    decided by the frozen boundary and an owner signature, never by which endpoint is configured.
+    There is no sandbox and no paper environment to select. Environment selection is a
+    configuration value, not an authority: whether capital may move is decided by the frozen
+    boundary and an owner signature, never by which endpoint is configured.
     """
 
     broker_id = "upstox"
 
-    def __init__(self, *, environment: str = "sandbox", **kwargs: Any) -> None:
+    def __init__(self, *, environment: str = "live", **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if environment not in {"sandbox", "live"}:
-            raise BrokerContractError("Upstox environment must be sandbox or live")
+        if environment not in ("live", "recorded"):
+            raise BrokerContractError(
+                "Upstox environment must be live or recorded; paper and sandbox do not exist")
         self._upstox_environment = environment
 
     @property
     def trade_base(self) -> str:
         return (UPSTOX_LIVE_TRADE_BASE if self._upstox_environment == "live"
-                else UPSTOX_SANDBOX_TRADE_BASE)
+                else f"{RECORDED_BASE}/v3")
 
     def order_capabilities(self) -> OrderCapabilities:
         return OrderCapabilities(order_types=frozenset({"LIMIT", "MARKET"}),
@@ -352,23 +364,25 @@ class UpstoxAdapter(_ChannelInjectedAdapter):
 
 
 class AlpacaAdapter(_ChannelInjectedAdapter):
-    """Alpaca Trading API adapter. Paper by default; live requires explicit endpoint selection.
+    """Alpaca Trading API adapter, pointed at the LIVE endpoint.
 
-    As with Upstox, choosing a live endpoint grants nothing. The frozen boundary and an owner
-    signature are what release capital, and neither can be bypassed by configuration.
+    The paper endpoint is not available on this adapter. As with Upstox, choosing an endpoint grants
+    nothing: the frozen boundary and an owner signature are what release capital, and neither can
+    be bypassed by configuration.
     """
 
     broker_id = "alpaca"
 
-    def __init__(self, *, environment: str = "paper", **kwargs: Any) -> None:
+    def __init__(self, *, environment: str = "live", **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if environment not in {"paper", "live"}:
-            raise BrokerContractError("Alpaca environment must be paper or live")
+        if environment not in ("live", "recorded"):
+            raise BrokerContractError(
+                "Alpaca environment must be live or recorded; the paper endpoint does not exist")
         self._alpaca_environment = environment
 
     @property
     def base_url(self) -> str:
-        return (ALPACA_LIVE_BASE if self._alpaca_environment == "live" else ALPACA_PAPER_BASE)
+        return (ALPACA_LIVE_BASE if self._alpaca_environment == "live" else RECORDED_BASE)
 
     def order_capabilities(self) -> OrderCapabilities:
         return OrderCapabilities(order_types=frozenset({"LIMIT", "MARKET"}),
@@ -445,15 +459,19 @@ class AlpacaAdapter(_ChannelInjectedAdapter):
 
 
 def default_upstox(**kwargs: Any) -> UpstoxAdapter:
-    """Upstox configured from the environment, with no transport: validation only, no network."""
-    return UpstoxAdapter(
-        environment=(os.getenv("UPSTOX_ENV", "sandbox").strip().lower() or "sandbox"), **kwargs)
+    """Upstox pointed at the LIVE endpoint, with no transport: validation only, no network.
+
+    There is no environment variable to point this at a sandbox: paper execution is not a mode
+    Trip's has.
+    """
+    return UpstoxAdapter(environment="live", **kwargs)
 
 
 def default_alpaca(**kwargs: Any) -> AlpacaAdapter:
-    return AlpacaAdapter(
-        environment=(os.getenv("ALPACA_ENV", "paper").strip().lower() or "paper"), **kwargs)
+    """Alpaca pointed at the LIVE endpoint, with no transport: validation only, no network."""
+    return AlpacaAdapter(environment="live", **kwargs)
 
 
-__all__ = ["AlpacaAdapter", "BrokerChannel", "BrokerContractError", "MAX_TAG_LENGTH",
-           "UpstoxAdapter", "canonical_json", "default_alpaca", "default_upstox"]
+__all__ = ["ALPACA_LIVE_BASE", "AlpacaAdapter", "BrokerChannel", "BrokerContractError",
+           "MAX_TAG_LENGTH", "RECORDED_BASE", "UPSTOX_LIVE_TRADE_BASE", "UpstoxAdapter",
+           "canonical_json", "default_alpaca", "default_upstox"]

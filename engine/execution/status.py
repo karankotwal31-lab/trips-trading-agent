@@ -26,12 +26,21 @@ from execution import (  # noqa: E402
     AMENDABLE_ADD_RULES,
     AMENDABLE_REMOVE_RULES,
     AMENDMENT_ARTIFACTS,
-    CORE_CAPABILITIES,
+    AUTONOMOUS_CAPABILITIES,
+    CANONICAL_LIVE_PATH,
     CANONICAL_STATE_MODEL_STATUS,
+    CORE_CAPABILITIES,
     EVIDENCE_ALLOWLIST,
+    EVIDENCE_KIND_LIVE_READ_ONLY,
+    EVIDENCE_KIND_RECORDED,
     FORBIDDEN_AUTOMATION_TECHNIQUES,
     FROZEN_CEILING_MAP,
+    LIVE_ENABLED_REQUIREMENTS,
+    MUTATION_REQUIRES_STAGE,
     PRECONDITIONS,
+    READ_ONLY_CHECKS,
+    STAGE_ORDER,
+    TRANSMISSION_POINT,
     AdapterRegistry,
     FrozenLiveBoundary,
     Lifecycle,
@@ -41,6 +50,7 @@ from execution import (  # noqa: E402
     SupervisorPolicy,
     SupervisorRunner,
     approved_symbol_scope,
+    assert_canonical_live_route,
     check_representable,
     describe_frozen_runtime_decisions,
     frozen_config_guard_permits,
@@ -48,6 +58,7 @@ from execution import (  # noqa: E402
     frozen_constitution_rule_ids,
     frozen_hard_limits,
     frozen_permitted_modes,
+    live_readiness_report,
     live_release_requirements,
     owner_authority_status,
     verify_frozen_core_digest,
@@ -152,8 +163,22 @@ def build_status() -> dict:
     rule_ids = frozen_constitution_rule_ids()
     registry = AdapterRegistry()
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "layer": "Trip's additive execution layer",
+        "live_money_only": True,
+        "stage_order": [stage.value for stage in STAGE_ORDER],
+        "paper_stage_present": any(stage.value == "PAPER" for stage in STAGE_ORDER),
+        "live_enabled_requirements": list(LIVE_ENABLED_REQUIREMENTS),
+        "canonical_live_path": assert_canonical_live_route(CANONICAL_LIVE_PATH),
+        "transmission_point": TRANSMISSION_POINT,
+        "first_mutation_stage": MUTATION_REQUIRES_STAGE,
+        "autonomous_capabilities": list(AUTONOMOUS_CAPABILITIES),
+        "evidence_kinds": {
+            "recorded": EVIDENCE_KIND_RECORDED,
+            "live_read_only": EVIDENCE_KIND_LIVE_READ_ONLY,
+            "read_only_checks": list(READ_ONLY_CHECKS),
+            "releases_capital": False,
+        },
         "modified_frozen_core": False,
         "frozen_core_digest_verified": verify_frozen_core_digest()["verified"],
         "approved_config_fingerprint": fingerprint_config(cfg),
@@ -162,6 +187,8 @@ def build_status() -> dict:
         "constitution_contains_live_gate": "LIVE_GATE" in rule_ids,
         "frozen_config_mode": frozen_config_mode(),
         "lifecycle_stage": lifecycle.stage.value,
+        "live_readiness": live_readiness_report(),
+        "live_readiness_by_lifecycle": lifecycle.live_readiness(),
         "live_transmission": lifecycle.may_transmit_live(),
         "boundary_verdict": verdict.to_dict(),
         "core_state_source": lifecycle.core_state_basis().source,
@@ -224,15 +251,23 @@ def build_status() -> dict:
         },
         "safety_suite_integrity": _suite_integrity(),
         "note": (
-            "The authority pipeline (frozen Truth/Risk/Constitution gates driven through preflight, "
-            "capability contract, adapter registry, session truth, identity-drift detection, "
-            "capital governor, two-permission gate, gateway, durable idempotency, reconciliation, "
-            "one-way supervisor halt) is implemented and tested, and the frozen paper cycle's "
-            "decisions are routed through it. Live capital release is refused by TWO independent "
-            "frozen facts: the Constitution's PAPER_FIRST rule and the frozen config_guard's "
-            "paper-only mode restriction. The owner-gated amendment mechanism that would lift both "
-            "is implemented and demonstrated. No real broker adapter ships: where no authorized "
-            "programmable interface exists the answer is BROKER_AUTOMATION_UNSUPPORTED."
+            "Trip's is a LIVE-MONEY-ONLY execution system. The stage order is RESEARCH -> BACKTEST "
+            "-> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED; there is no paper stage, "
+            "no paper endpoint and no paper credential anywhere on the route, and there is no "
+            "runtime fallback between environments. Recorded transcripts, mocks and simulations "
+            "are engineering tests, not trading environments: they create no portfolio state and "
+            "prove implementation behaviour only (RECORDED_CONTRACT_CONFORMANCE). Evidence about "
+            "the real account comes from LIVE_READ_ONLY_BROKER_VERIFICATION, which submits no "
+            "order. Neither releases capital. The authority pipeline (frozen Truth/Risk/Constitution "
+            "gates driven through preflight, capability contract, adapter registry, session "
+            "truth, identity-drift detection, capital governor, two-permission gate, gateway, "
+            "durable idempotency, reconciliation, one-way supervisor halt) is implemented and "
+            "tested. The first mutation of a real brokerage account occurs in the gateway, holding "
+            "an owner-signed permit, and only at stage LIVE_ENABLED. Live capital release is "
+            "refused by THREE independent frozen facts: the Constitution's PAPER_FIRST rule, the "
+            "frozen config_guard's paper-only mode restriction, and the frozen Risk engine's own "
+            "paper_mode check. The owner-gated amendment mechanism that would lift all three is "
+            "implemented and demonstrated. This build holds at LIVE_READY_LOCKED."
         ),
     }
 

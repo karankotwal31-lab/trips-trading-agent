@@ -48,6 +48,8 @@ ENGINEERING_CHECKS: Tuple[str, ...] = (
     "broker_channel_implementation_exercised",
     "broker_specific_normalization_exercised",
     "per_capability_conformance_evidence",
+    "recorded_evidence_is_not_live_evidence",
+    "live_read_only_verification_cannot_mutate",
     "translation_round_trip_proven",
     "reconciliation_engine_exercised",
     "market_data_pipeline_exercised",
@@ -66,7 +68,7 @@ ENGINEERING_WORK_COVERAGE: Mapping[str, str] = {
         "per_capability_conformance_evidence",
     "a reconciliation engine executed against known-agreeing and known-disagreeing fixtures":
         "reconciliation_engine_exercised",
-    "a paper/sandbox order lifecycle exercised end to end":
+    "RECORDED_CONTRACT_CONFORMANCE evidence for implementation behaviour":
         "per_capability_conformance_evidence",
     "a production market-data provider implementation": "market_data_pipeline_exercised",
     "integration with the frozen Truth Engine": "market_data_pipeline_exercised",
@@ -120,9 +122,14 @@ def _http_date() -> str:
     return format_datetime(datetime.now(timezone.utc), usegmt=True)
 
 
-#: Recorded Upstox sandbox transcripts. These are the BROKER'S ANSWERS, recorded. The channel, its
+#: Recorded Upstox transcripts. These are the BROKER'S ANSWERS, recorded. The channel, its
 #: URL construction, its envelope checks and its normalization all execute against them exactly as
 #: they would against the network, and an unrecorded request is an error rather than a pass.
+#:
+#: A recorded transcript is an ENGINEERING FIXTURE. It is not a trading environment, it holds no
+#: account, it creates no portfolio state, and evidence produced through it is
+#: ``RECORDED_CONTRACT_CONFORMANCE`` - which proves what the implementation does when handed an
+#: answer, and says nothing whatever about a real brokerage account.
 UPSTOX_TRANSCRIPTS: Dict[str, Dict[str, Any]] = {
     "GET /v3/user/profile": {"payload": {"status": "success", "data": {
         "user_id": "recorded-user", "user_name": "conformance", "exchange_segments": "NSE_EQ,BSE_EQ",
@@ -173,10 +180,10 @@ def _recorded_channels() -> Dict[str, Any]:
     from .channels import AlpacaChannel, RecordedTransport, UpstoxChannel
 
     return {
-        "upstox": UpstoxChannel(environment="sandbox", access_token="recorded",
+        "upstox": UpstoxChannel(environment="recorded", access_token="recorded",
                                 transport=RecordedTransport(UPSTOX_TRANSCRIPTS),
                                 allow_mutation_probes=True),
-        "alpaca": AlpacaChannel(environment="paper", api_key="recorded", api_secret="recorded",
+        "alpaca": AlpacaChannel(environment="recorded", api_key="recorded", api_secret="recorded",
                                 transport=RecordedTransport(ALPACA_TRANSCRIPTS),
                                 allow_mutation_probes=True),
     }
@@ -187,6 +194,9 @@ def _mandate_records(*, now: datetime) -> Dict[str, Any]:
 
     Upstox is recorded serving ``IN_EQUITY_CASH``. That is a true fact about the interface, and it
     is precisely why full interface conformance cannot make Upstox eligible for SPY, QQQ and AAPL.
+
+    These records carry ``environment="recorded"``. That is not a formality: it is what stops a
+    recorded answer being read back later as evidence about a live account.
     """
     from .conformance import MandateEvidence
 
@@ -194,16 +204,16 @@ def _mandate_records(*, now: datetime) -> Dict[str, Any]:
         "upstox": MandateEvidence(
             broker_id="upstox", mandate_id="IN_EQUITY_CASH",
             instruments=("SBIN", "RELIANCE"), asset_class="IN_EQUITY_CASH",
-            environment="sandbox", observed_by="recorded_upstox_profile", observed_at=now.isoformat(),
+            environment="recorded", observed_by="recorded_upstox_profile", observed_at=now.isoformat(),
             observation={"exchange_segments": "NSE_EQ,BSE_EQ",
-                         "source": "upstox v3 user profile, recorded sandbox transcript"}),
+                         "source": "upstox v3 user profile, recorded transcript"}),
         "alpaca": MandateEvidence(
             broker_id="alpaca", mandate_id=APPROVED_INSTRUMENT_SCOPE,
             instruments=("SPY", "QQQ", "AAPL"), asset_class="US_EQUITY_CASH_LONG_ONLY",
-            environment="paper",
+            environment="recorded",
             observed_by="recorded_alpaca_account", observed_at=now.isoformat(),
             observation={"account_status": "ACTIVE", "currency": "USD",
-                         "source": "alpaca v2 account, recorded paper transcript"}),
+                         "source": "alpaca v2 account, recorded transcript"}),
     }
 
 
@@ -342,11 +352,11 @@ def _check_normalization(now: datetime) -> EngineeringEvidence:
         except Exception as exc:
             observation[label] = type(exc).__name__
 
-    channel = AlpacaChannel(environment="paper", api_key="recorded", api_secret="recorded",
+    channel = AlpacaChannel(environment="recorded", api_key="recorded", api_secret="recorded",
                             transport=RecordedTransport(ALPACA_TRANSCRIPTS))
     observation["alpaca_channel_account"] = channel.account().account_id
     channel.close()
-    upstox = UpstoxChannel(environment="sandbox", access_token="recorded",
+    upstox = UpstoxChannel(environment="recorded", access_token="recorded",
                            transport=RecordedTransport(UPSTOX_TRANSCRIPTS))
     upstox.close()
     observation["disconnect"] = "both channels refused further requests after close"
@@ -384,6 +394,142 @@ def _check_conformance_evidence(now: datetime, evidence: Mapping[str, Any]) -> E
                            "record") if not problems else "; ".join(problems),
                    produced_by="execution.conformance.ConformanceSuite", observation=observation,
                    now=now)
+
+
+def _check_recorded_is_not_live(now: datetime,
+                                evidence: Mapping[str, Any]) -> EngineeringEvidence:
+    """Prove a recorded transcript cannot be read back as evidence about a live account.
+
+    Without this, removing paper trading would have quietly substituted recorded fixtures for the
+    live verification it removed - and a recorded answer is worth exactly as much about a real
+    brokerage account as it is about a real brokerage account's owner: nothing at all. The
+    separation has to be mechanical, not editorial.
+    """
+    from .live_verification import EVIDENCE_KIND_LIVE_READ_ONLY, EVIDENCE_KIND_RECORDED
+
+    observation: Dict[str, Any] = {
+        "recorded_evidence_kind": EVIDENCE_KIND_RECORDED,
+        "live_evidence_kind": EVIDENCE_KIND_LIVE_READ_ONLY,
+    }
+    problems: List[str] = []
+    for broker_id, document in sorted(evidence.items()):
+        if document.environment != "recorded":
+            problems.append(f"{broker_id}: conformance evidence claims environment "
+                            f"{document.environment!r} rather than 'recorded'")
+        live_view = document.status("order_submission", now=now, environment="live")
+        account_view = document.status("account", now=now, environment="live")
+        mandate = document.mandate_verdict(sorted(APPROVED_INSTRUMENT_SCOPE), environment="live")
+        observation[broker_id] = {
+            "environment": document.environment,
+            "order_submission_as_live": live_view.value,
+            "account_as_live": account_view.value,
+            "mandate_as_live_permitted": mandate["permitted"],
+            "mandate_as_live_reasons": list(mandate["reasons"]),
+        }
+        if live_view.permits_execution or account_view.permits_execution:
+            problems.append(f"{broker_id}: recorded evidence was accepted as live evidence")
+        if mandate["permitted"]:
+            problems.append(f"{broker_id}: a recorded mandate was accepted as a live mandate")
+    if EVIDENCE_KIND_RECORDED == EVIDENCE_KIND_LIVE_READ_ONLY:
+        problems.append("the two evidence kinds are not distinct")
+    return _record("recorded_evidence_is_not_live_evidence", passed=not problems,
+                   detail=("recorded transcripts are stamped RECORDED_CONTRACT_CONFORMANCE and are "
+                           "refused when resolved against the live environment, so removing paper "
+                           "trading did not quietly substitute fixtures for live verification")
+                   if not problems else "; ".join(problems),
+                   produced_by="execution.conformance + execution.live_verification",
+                   observation=observation, now=now)
+
+
+def _check_read_only_verification_cannot_mutate(now: datetime) -> EngineeringEvidence:
+    """Execute the refusal chain that makes pre-live broker validation read-only.
+
+    A readiness run that *could* place an order is a readiness run that might place one. So the
+    properties are executed here rather than described: the read-only view exposes no mutating
+    method, the verifier refuses a target that does, a recorded fixture is refused as a live
+    verification, and a channel will not submit or cancel without an owner-signed permit.
+    """
+    from .channels import AlpacaChannel, LiveAccountReadOnlyView, RecordedTransport, UpstoxChannel
+    from .live_verification import (READ_ONLY_CHECKS, READ_ONLY_METHODS,
+                                    LiveReadOnlyVerification, MutatingObservation,
+                                    assert_non_mutating)
+
+    alpaca = AlpacaChannel(environment="recorded", api_key="recorded", api_secret="recorded",
+                           transport=RecordedTransport(ALPACA_TRANSCRIPTS))
+    view = LiveAccountReadOnlyView(alpaca)
+    exposed = {name for name in dir(view) if not name.startswith("_")}
+    mutating = sorted(name for name in exposed
+                      if any(verb in name for verb in ("submit", "cancel", "place", "replace",
+                                                      "modify", "close_order")))
+
+    # The wrapper passes the structural check: it genuinely cannot mutate.
+    wrapper_refused = False
+    try:
+        assert_non_mutating(view)
+    except MutatingObservation:
+        wrapper_refused = True
+
+    # A real channel does expose them, and is therefore refused as a verification target.
+    channel_refused = False
+    try:
+        assert_non_mutating(alpaca)
+    except MutatingObservation:
+        channel_refused = True
+
+    # A recorded fixture can never be reported as live read-only verification.
+    recorded_refused = False
+    try:
+        LiveReadOnlyVerification(broker_id="alpaca", account_id="ACCT", environment="recorded",
+                                 generated_at=now.isoformat())
+    except Exception as exc:
+        recorded_refused = "live" in str(exc)
+
+    # And a mutation without a permit is refused before a request is built.
+    upstox = UpstoxChannel(environment="recorded", access_token="recorded",
+                           transport=RecordedTransport(UPSTOX_TRANSCRIPTS),
+                           allow_mutation_probes=True)
+    unpermitted = []
+    for label, call in (("submit", lambda: upstox.submit(client_order_id="x",
+                                                          representation={"quantity": 1})),
+                        ("cancel", lambda: upstox.cancel(broker_order_id="x", reason="y"))):
+        try:
+            call()
+            unpermitted.append(f"{label} was not refused without a permit")
+        except Exception as exc:
+            if type(exc).__name__ != "MutationWithoutPermit":
+                unpermitted.append(f"{label} failed with {type(exc).__name__} rather than refusing")
+    transmitted = [call for call in upstox._transport.calls if call["method"] in ("POST", "DELETE",
+                                                                                  "PATCH")]
+    alpaca.close()
+    upstox.close()
+
+    observation = {
+        "read_only_methods": list(READ_ONLY_METHODS),
+        "read_only_checks": list(READ_ONLY_CHECKS),
+        "view_exposes": sorted(exposed),
+        "view_mutating_methods": mutating,
+        "wrapper_refused": wrapper_refused,
+        "channel_refused": channel_refused,
+        "recorded_verification_refused": recorded_refused,
+        "requests_sent_by_unpermitted_mutations": len(transmitted),
+    }
+    problems = [entry for entry in unpermitted if entry]
+    if mutating:
+        problems.append(f"the read-only view exposes mutating methods {mutating}")
+    if wrapper_refused:
+        problems.append("the read-only view was itself refused as a verification target")
+    if not channel_refused:
+        problems.append("a channel exposing submit/cancel was accepted as a verification target")
+    if not recorded_refused:
+        problems.append("a recorded fixture could be reported as live read-only verification")
+    if transmitted:
+        problems.append(f"{len(transmitted)} requests were built by unpermitted mutations")
+    return _record("live_read_only_verification_cannot_mutate", passed=not problems,
+                   detail=("the pre-live broker verification surface exposes no mutating method, "
+                           "refuses any target that does, refuses a recorded fixture as live "
+                           "evidence, and placed nothing") if not problems else "; ".join(problems),
+                   produced_by="execution.live_verification + execution.channels",
+                   observation=observation, now=now)
 
 
 def _translation_fixtures() -> List[Dict[str, Any]]:
@@ -655,6 +801,9 @@ _CHECKS: Tuple[Tuple[str, Callable[..., EngineeringEvidence], bool], ...] = (
     ("broker_channel_implementation_exercised", _check_broker_channels, False),
     ("broker_specific_normalization_exercised", _check_normalization, False),
     ("per_capability_conformance_evidence", _check_conformance_evidence, True),
+    ("recorded_evidence_is_not_live_evidence", _check_recorded_is_not_live, True),
+    ("live_read_only_verification_cannot_mutate", _check_read_only_verification_cannot_mutate,
+     False),
     ("translation_round_trip_proven", _check_translation_round_trip, False),
     ("reconciliation_engine_exercised", _check_reconciliation, False),
     ("market_data_pipeline_exercised", _check_market_data, False),
@@ -711,6 +860,48 @@ def engineering_ready(*, now: Optional[datetime] = None) -> Tuple[bool, List[Eng
     return all(record.passed for record in records), records
 
 
+def live_readiness_report(*, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """The non-mutating readiness report CI prints. Touches no brokerage account.
+
+    Everything executed here runs against recorded fixtures or the local build. Nothing in this
+    function can authenticate to a broker, place an order, or cancel one - which is precisely
+    what a CI job is allowed to do. The one thing it deliberately does NOT claim is live broker
+    compatibility: with no live credentials present, that is reported as NOT_VERIFIED and stays
+    an owner item.
+    """
+    from .lifecycle import LIVE_ENABLED_REQUIREMENTS, STAGE_ORDER, Stage
+    from .live_path import CANONICAL_LIVE_PATH, assert_canonical_live_route
+    from .live_verification import (EVIDENCE_KIND_LIVE_READ_ONLY, EVIDENCE_KIND_RECORDED,
+                                    READ_ONLY_CHECKS)
+
+    records, conformance = collect_evidence(now=now)
+    failing = [record.name for record in records if not record.passed]
+    return {
+        "stage": "LIVE_READY_LOCKED" if not failing else "LIVE_LOCKED",
+        "reached_live_enabled": False,
+        "stage_order": [stage.value for stage in STAGE_ORDER],
+        "paper_stage_present": any(stage.value == "PAPER" for stage in STAGE_ORDER),
+        "live_enabled_requirements": list(LIVE_ENABLED_REQUIREMENTS),
+        "canonical_live_path": assert_canonical_live_route(CANONICAL_LIVE_PATH),
+        "engineering_ready": not failing,
+        "failing_engineering": failing,
+        "checks": {record.name: record.passed for record in records},
+        "conformance_evidence_kind": EVIDENCE_KIND_RECORDED,
+        "live_broker_verification": {
+            "evidence_kind": EVIDENCE_KIND_LIVE_READ_ONLY,
+            "status": "NOT_VERIFIED",
+            "reason": ("no live brokerage credential is present in CI; this job performs only "
+                       "non-mutating local validation and never contacts a broker account"),
+            "read_only_checks_required": list(READ_ONLY_CHECKS),
+            "submits_no_order": True,
+        },
+        "releases_capital": False,
+        "note": ("Trip's is live-money-only. There is no paper stage, no paper endpoint and no "
+                 "paper credential. Recorded fixtures are engineering tests, not trading "
+                 "environments, and neither evidence kind releases capital."),
+    }
+
+
 __all__ = [
     "CONFORMANCE_RECORD_VERSION",
     "ENGINEERING_CHECKS",
@@ -720,4 +911,5 @@ __all__ = [
     "EngineeringEvidence",
     "collect_evidence",
     "engineering_ready",
+    "live_readiness_report",
 ]

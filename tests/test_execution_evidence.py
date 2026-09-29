@@ -73,16 +73,16 @@ def _intent(**overrides):
 
 
 def _upstox_channel(**kwargs):
-    return UpstoxChannel(environment="sandbox", access_token="recorded",
+    return UpstoxChannel(environment="recorded", access_token="recorded",
                          transport=RecordedTransport(dict(UPSTOX_TRANSCRIPTS)), **kwargs)
 
 
 def _alpaca_channel(**kwargs):
-    return AlpacaChannel(environment="paper", api_key="recorded", api_secret="recorded",
+    return AlpacaChannel(environment="recorded", api_key="recorded", api_secret="recorded",
                          transport=RecordedTransport(dict(ALPACA_TRANSCRIPTS)), **kwargs)
 
 
-def _conformance(broker_id="test", *, environment="sandbox", now=NOW, **overrides):
+def _conformance(broker_id="test", *, environment="recorded", now=NOW, **overrides):
     """A typed, digest-checked document with one record per capability."""
     from execution.contracts import OPTIONAL_CAPABILITIES
 
@@ -156,7 +156,7 @@ def test_each_capability_resolves_independently_and_a_proven_negative_is_kept():
 
 
 def test_a_capability_with_no_record_is_unverified_and_never_supported():
-    document = ConformanceEvidence(broker_id="b", environment="sandbox", suite="s",
+    document = ConformanceEvidence(broker_id="b", environment="recorded", suite="s",
                                    generated_at=NOW.isoformat(), records={})
     assert document.status("order_submission") is CapabilityStatus.UNVERIFIED
     assert document.is_complete() is False
@@ -165,7 +165,7 @@ def test_a_capability_with_no_record_is_unverified_and_never_supported():
 
 def test_tampered_stale_or_mismatched_evidence_stops_resolving_to_supported():
     record = CapabilityEvidence(capability="order_submission", status=CapabilityStatus.SUPPORTED,
-                                interface="b/v1/orders", environment="sandbox",
+                                interface="b/v1/orders", environment="recorded",
                                 observed_by="run", observed_at=NOW.isoformat(),
                                 observation={"probe": "p", "exercised": True})
     assert record.resolve()[0] is CapabilityStatus.SUPPORTED
@@ -209,7 +209,7 @@ def pytest_free(expected):
 
 
 def test_the_conformance_suite_itself_produces_independent_evidence():
-    evidence = ConformanceSuite(broker_id="alpaca", environment="paper",
+    evidence = ConformanceSuite(broker_id="alpaca", environment="recorded",
                                 channel=_alpaca_channel(allow_mutation_probes=True),
                                 mandate=None).run(now=NOW)
     assert evidence.is_complete()
@@ -225,7 +225,7 @@ def test_the_conformance_suite_itself_produces_independent_evidence():
 
 
 def test_a_channel_without_mutation_probes_leaves_submission_unverified():
-    evidence = ConformanceSuite(broker_id="upstox", environment="sandbox",
+    evidence = ConformanceSuite(broker_id="upstox", environment="recorded",
                                 channel=_upstox_channel(), mandate=None).run(now=NOW)
     assert evidence.status("order_submission") is CapabilityStatus.UNVERIFIED
     assert evidence.status("order_cancel") is CapabilityStatus.UNVERIFIED
@@ -490,7 +490,7 @@ def test_the_registry_refuses_a_conformant_broker_that_cannot_serve_the_mandate(
 def test_mandate_evidence_stale_or_mislabelled_does_not_permit_execution():
     stale = MandateEvidence(broker_id="alpaca", mandate_id=APPROVED_INSTRUMENT_SCOPE,
                             instruments=("SPY", "QQQ", "AAPL"),
-                            asset_class=APPROVED_INSTRUMENT_SCOPE, environment="paper",
+                            asset_class=APPROVED_INSTRUMENT_SCOPE, environment="recorded",
                             observed_by="run",
                             observed_at=(NOW - timedelta(days=400)).isoformat(),
                             observation={"probe": "p", "exercised": True})
@@ -499,7 +499,7 @@ def test_mandate_evidence_stale_or_mislabelled_does_not_permit_execution():
     assert document.mandate_verdict(SCOPE)["permitted"] is False
     mismatched = replace(stale, observed_at=NOW.isoformat())
     document = replace(_conformance(), mandate=mismatched)
-    assert document.mandate_verdict(SCOPE)["permitted"] is True, "paper evidence covers paper"
+    assert document.mandate_verdict(SCOPE)["permitted"] is True, "the record covers its own environment"
     assert document.mandate_verdict(SCOPE, environment="live")["permitted"] is False
 
 
@@ -544,7 +544,7 @@ def test_broker_specific_normalization_is_exercised_and_refuses_malformed_payloa
 def test_a_channel_cannot_be_asked_to_do_something_it_has_no_transcript_for():
     channel = _alpaca_channel()
     try:
-        channel._transport.request("GET", "https://paper-api.alpaca.markets/v2/nonexistent")
+        channel._transport.request("GET", "https://recorded.invalid/v2/nonexistent")
         raise AssertionError("an unrecorded request must be an error, not a silent pass")
     except BrokerChannelError:
         pass
@@ -556,12 +556,12 @@ def test_closing_a_channel_is_enforced_and_is_the_last_probe_to_run():
     channel = _upstox_channel(allow_mutation_probes=True)
     order = [name for name, _ in ConformanceSuite._probe_order()]
     assert order[-1] == "disconnect", "disconnect closes the channel, so it must run last"
-    evidence = ConformanceSuite(broker_id="upstox", environment="sandbox", channel=channel,
+    evidence = ConformanceSuite(broker_id="upstox", environment="recorded", channel=channel,
                                 mandate=None).run(now=NOW)
     assert evidence.status("disconnect") is CapabilityStatus.SUPPORTED
     assert evidence.status("order_submission") is CapabilityStatus.SUPPORTED
     with pytest_free(BrokerChannelError):
-        channel._transport.request("GET", "https://api-sandbox.upstox.com/v3/user/profile")
+        channel._transport.request("GET", "https://recorded.invalid/v3/user/profile")
 
 
 # ---------------------------------------------------------------------------

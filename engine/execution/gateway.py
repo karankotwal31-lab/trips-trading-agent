@@ -38,6 +38,7 @@ from .contracts import (
     ExecutionState,
     IntentExpired,
     LedgerError,
+    LiveMutationPermit,
     assert_preserves_economic_meaning,
     assert_transition_allowed,
     approved_symbol_scope,
@@ -45,6 +46,7 @@ from .contracts import (
     check_representable,
     decision_bar_is_closed,
 )
+from .live_path import mutation_stage
 from .gate import AuthorityGate, capital_release, trade_valid
 from .lifecycle import Lifecycle
 from .reconciliation import ReconciliationEngine
@@ -499,8 +501,23 @@ class UniversalBrokerGateway:
         self._ledger.reserve(intent, broker_id=getattr(self._adapter, "broker_id", None),
                              account_id=observables["account_id"])
         self._ledger.record(intent, state=ExecutionState.SUBMITTING, outcome="SUBMITTING")
+        # THE FIRST MUTATION OF A REAL BROKERAGE ACCOUNT HAPPENS HERE, AND ONLY HERE.
+        #
+        # Everything above this line is read-only. The permit is minted from the frozen boundary
+        # verdict that ``may_transmit_live`` just produced - never from a caller argument - and it
+        # is bound to this broker and this account, so it cannot be reused or widened. Readiness
+        # verification, conformance, reconciliation and every other path in this system run
+        # without one and therefore cannot trade.
+        permit = LiveMutationPermit(
+            stage=mutation_stage(),
+            broker_id=str(getattr(self._adapter, "broker_id", "")),
+            account_id=str(observables.get("account_id") or ""),
+            authorization_key_id=str(self._lifecycle.authorization_status()
+                                     .get("key_id") or self._lifecycle.authorization_status()
+                                     .get("authorization_key_id") or "unbound"))
         try:
-            ack = self._adapter.submit_order(client_order_id=cid, representation=representation)
+            ack = self._adapter.submit_order(client_order_id=cid, representation=representation,
+                                             permit=permit)
         except Exception as exc:
             # A lost response is NEVER a reason to resubmit. Resolve from broker evidence.
             self._ledger.record(intent, state=ExecutionState.UNKNOWN_PENDING_RECONCILIATION,
@@ -555,8 +572,21 @@ class UniversalBrokerGateway:
         if actor == "SAFETY_CONTROLLER" and not policy.get("allow_autonomous_cancel_all", False):
             return {"cancelled": False, "code": "CANCELLATION_NOT_APPROVED_BY_POLICY", "actor": actor,
                     "broker_order_id": broker_order_id, "reason": reason}
+        boundary = self._lifecycle.may_transmit_live()
+        permit = None
+        if boundary["permitted"]:
+            try:
+                account = self._adapter.account()
+            except Exception:
+                account = None
+            permit = LiveMutationPermit(
+                stage=mutation_stage(),
+                broker_id=str(getattr(self._adapter, "broker_id", "")),
+                account_id=str(getattr(account, "account_id", "") or ""),
+                authorization_key_id="unbound")
         try:
-            ack = self._adapter.cancel_order(broker_order_id=broker_order_id, reason=reason)
+            ack = self._adapter.cancel_order(broker_order_id=broker_order_id, reason=reason,
+                                             permit=permit)
         except Exception as exc:
             return {"cancelled": False, "code": "CANCEL_OUTCOME_UNKNOWN", "actor": actor,
                     "broker_order_id": broker_order_id, "error_type": type(exc).__name__}

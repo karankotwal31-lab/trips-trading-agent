@@ -15,10 +15,11 @@ architecture actually wants:
   ``validity`` and ``tradingsymbol``. Alpaca returns a bare object and names them ``side``,
   ``time_in_force`` and ``symbol``. Every response is shape-checked before use; a malformed or
   identity-less row is an error, never an empty result and never a silently dropped row.
-* **Mutation probes are opt-in and never run against a live endpoint.** ``order_submission`` and
-  ``order_cancel`` probes require ``allow_mutation_probes=True`` AND a non-live environment. By
-  default they are not exercised, so those two capabilities stay UNVERIFIED - which is the honest
-  answer for a channel nobody has pointed at a paper account yet.
+* **Mutation probes are engineering-only and never run against a live endpoint.**
+  ``order_submission`` and ``order_cancel`` probes require ``allow_mutation_probes=True`` AND a
+  ``recorded`` channel, whose transport cannot open a socket. A live channel refuses them outright.
+  By default they are not exercised at all, so those two capabilities stay UNVERIFIED - which is
+  the honest answer for a channel nobody has pointed at a real account yet.
 
 Every channel also exposes the probe methods the conformance suite runs
 (:mod:`execution.conformance`). A channel with no probe for a capability leaves that capability
@@ -38,8 +39,28 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .adapters import BrokerChannel
 from .conformance import NotExercised
-from .contracts import BrokerAccount, BrokerHealth, BrokerPosition, ExecutionState
+from .live_verification import REQUIRED_INSTRUMENTS
+from .contracts import (MUTATION_REQUIRES_STAGE, BrokerAccount, BrokerHealth, BrokerPosition,
+                        ExecutionState, LiveMutationPermit, MutationWithoutPermit)
 from .reconciliation import ReconciliationEngine
+
+#: The ONLY environments a channel may be constructed in.
+#:
+#: ``live`` is the real brokerage endpoint and the only one on the final execution route.
+#: ``recorded`` has no endpoint at all: it is fed fixed transcripts by engineering tests and cannot
+#: reach a broker. Paper and sandbox environments are GONE - not deprecated, not hidden behind a
+#: flag. A paper endpoint or credential has no way onto the live route, and there is no runtime
+#: fallback between environments: a channel is constructed in exactly one environment, chosen at
+#: construction, and nothing in this module can switch it.
+LIVE_ENVIRONMENTS: Tuple[str, ...] = ("live", "recorded")
+
+#: Environments a mutation permit may be used in. Recorded channels are test fixtures; a real order
+#: may never be placed through one.
+PERMITTED_MUTATION_ENVIRONMENTS: Tuple[str, ...] = ("live",)
+
+#: A non-routable host used to give recorded channels a well-formed base URL so their path
+#: construction runs exactly as it does live. ``RecordedTransport`` never opens a socket.
+RECORDED_BASE = "https://recorded.invalid"
 
 #: Hard ceiling on any broker response body. A broker that streams without bound is a fault.
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -113,7 +134,17 @@ class RecordedTransport(_HttpTransport):
     and its normalization all run exactly as they do against the network. What is recorded is the
     broker's answer. A request for which no transcript exists is an error, so a probe can never
     pass because nothing happened.
+
+    This is an engineering fixture. It is not a trading environment, it holds no account, it
+    creates no portfolio state, and evidence produced through it is
+    ``RECORDED_CONTRACT_CONFORMANCE`` - which proves implementation behaviour and says nothing about
+    whether a real broker today accepts a real account.
     """
+
+    #: Declared error contract, read back by the read-only verification rather than provoked.
+    raises_typed_error = True
+    empty_success_is_impossible = True
+    rate_limit_headers_supported = False
 
     def __init__(self, transcripts: Mapping[str, Mapping[str, Any]]) -> None:
         super().__init__()
@@ -162,7 +193,6 @@ class RecordedTransport(_HttpTransport):
 # ---------------------------------------------------------------------------
 
 UPSTOX_LIVE_TRADE_BASE = "https://api-hft.upstox.com/v3"
-UPSTOX_SANDBOX_TRADE_BASE = "https://api-sandbox.upstox.com/v3"
 UPSTOX_PROFILE_PATH = "/user/profile"
 UPSTOX_FUNDS_PATH = "/user/funds"
 UPSTOX_POSITIONS_PATH = "/portfolio/short-term-positions"
@@ -267,7 +297,80 @@ def _upstox_state(raw: str) -> str:
         raise BrokerChannelError(f"unmapped upstox order state {raw!r}") from None
 
 
-class UpstoxChannel(BrokerChannel):
+class _LiveBrokerChannel(BrokerChannel):
+    """Shared enforcement and read-only surface for both concrete channels.
+
+    Two things live here because both must be impossible to get wrong per-broker:
+
+    * ``_authorize_mutation`` - the single choke point every place/cancel must pass. Without a
+      ``LiveMutationPermit`` bound to this broker and this account, at stage LIVE_ENABLED, a
+      mutation is refused before a request is built.
+    * the read-only reads readiness verification needs: instrument metadata, broker clock, account
+      restrictions, error-behaviour metadata and market-data entitlement.
+    """
+
+    broker_id = "abstract"
+    environment = "live"
+
+    def _authorize_mutation(self, permit: Optional[LiveMutationPermit]) -> None:
+        if permit is None:
+            raise MutationWithoutPermit(
+                "this call would change a real brokerage account and no owner-signed mutation "
+                "permit was supplied. Readiness verification, conformance and reconciliation never "
+                "carry one, so they cannot trade.")
+        if not isinstance(permit, LiveMutationPermit):
+            raise MutationWithoutPermit("a mutation permit is required and must be typed")
+        permit.check(broker_id=self.broker_id,
+                     account_id=str(getattr(self, "_account_id", "") or ""))
+
+    # -- read-only surface ------------------------------------------------
+
+    def recent_orders(self) -> Sequence[Mapping[str, Any]]:
+        raise BrokerChannelError(f"{self.broker_id} exposes no recent-orders read")
+
+    def instrument(self, symbol: str) -> Mapping[str, Any]:
+        raise BrokerChannelError(f"{self.broker_id} exposes no instrument metadata read")
+
+    def clock(self) -> Mapping[str, Any]:
+        response = self._transport.request("GET", f"{self.base_url}{self._CLOCK_PATH}",
+                                           headers=self._read_headers())
+        from email.utils import parsedate_to_datetime
+
+        raw = str((response.get("headers") or {}).get("date") or "").strip()
+        if not raw:
+            raise BrokerChannelError("the broker returned no clock reference")
+        served = parsedate_to_datetime(raw)
+        if served is None or served.tzinfo is None:
+            raise BrokerChannelError("the broker clock reference is not timezone-aware")
+        return {"timestamp": served.astimezone(timezone.utc).isoformat(), "source": "http_date"}
+
+    def restrictions(self) -> Mapping[str, Any]:
+        raise BrokerChannelError(f"{self.broker_id} exposes no account-restrictions read")
+
+    def probe_error_behaviour(self) -> Mapping[str, Any]:
+        """Read back the transport's error contract. Sends nothing.
+
+        Deliberately non-probing: provoking a rate limit or a bad request against a live account is
+        an outage risk and, in the case of a rejected order, a mutation attempt. This reports what
+        the transport guarantees - typed errors, never an empty success - from its own declared
+        contract, which is the part a readiness run can establish without touching the account.
+        """
+        transport = type(self._transport)
+        return {"raises_typed_error": getattr(transport, "raises_typed_error", True) is True,
+                "empty_success_is_impossible": getattr(
+                    transport, "empty_success_is_impossible", True) is True,
+                "rate_limit_headers_supported": getattr(
+                    transport, "rate_limit_headers_supported", False) is True,
+                "note": "declared transport contract; no request was made to provoke an error"}
+
+    def market_data_entitlement(self) -> Mapping[str, Any]:
+        raise BrokerChannelError(f"{self.broker_id} reports no market-data entitlement")
+
+    def _read_headers(self) -> Dict[str, str]:
+        return {}
+
+
+class UpstoxChannel(_LiveBrokerChannel):
     """Upstox V3 over its documented REST interface.
 
     Upstox is an Indian-market broker. Its interface conformance is genuinely measurable, and this
@@ -281,6 +384,7 @@ class UpstoxChannel(BrokerChannel):
     #: Factual venue fact, stated once. It is evidence for the mandate record, never a gate by
     #: itself: if factual evidence ever established otherwise, the mandate record would say so.
     VENUE = "IN"
+    _CLOCK_PATH = UPSTOX_PROFILE_PATH
 
     _PATHS = {
         "broker_identity": UPSTOX_PROFILE_PATH, "auth_state": UPSTOX_PROFILE_PATH,
@@ -292,25 +396,27 @@ class UpstoxChannel(BrokerChannel):
         "order_replace": UPSTOX_ORDER_REPLACE_PATH,
     }
 
-    def __init__(self, *, environment: str = "sandbox", access_token: Optional[str] = None,
+    def __init__(self, *, environment: str = "live", access_token: Optional[str] = None,
                  transport: Optional[_HttpTransport] = None,
                  allow_mutation_probes: bool = False) -> None:
-        if environment not in {"sandbox", "live"}:
-            raise BrokerChannelError("upstox environment must be sandbox or live")
+        if environment not in LIVE_ENVIRONMENTS:
+            raise BrokerChannelError(
+                f"upstox environment must be one of {LIVE_ENVIRONMENTS}; paper and sandbox "
+                f"environments do not exist")
         self.environment = environment
-        self.base_url = UPSTOX_LIVE_TRADE_BASE if environment == "live" else UPSTOX_SANDBOX_TRADE_BASE
+        self.base_url = UPSTOX_LIVE_TRADE_BASE if environment == "live" else f"{RECORDED_BASE}/v3"
         token = (access_token or "").strip()
-        if not token and transport is None:
+        if environment == "live" and not token and transport is None:
             raise BrokerChannelError(
                 "an upstox channel needs an access token or an explicit transport; this repository "
                 "ships no credential and no way to obtain one")
         self._token = token
         self._transport = transport or _HttpTransport()
         self._allow_mutation_probes = bool(allow_mutation_probes)
-        if self._allow_mutation_probes and environment == "live":
+        if self._allow_mutation_probes and environment != "recorded":
             raise BrokerChannelError(
-                "mutation probes are never run against a live endpoint; they place and cancel real "
-                "orders. Conformance mutation evidence belongs in sandbox")
+                "mutation probes place and cancel real orders; they are refused outside a recorded "
+                "engineering fixture and are never a readiness check")
 
     # -- plumbing --------------------------------------------------------
 
@@ -329,11 +435,18 @@ class UpstoxChannel(BrokerChannel):
         return self._transport.request("GET", url, headers=headers)["payload"]
 
     def _post(self, capability: str, body: Mapping[str, Any],
-              *, query: Optional[Mapping[str, str]] = None) -> Mapping[str, Any]:
-        if not self._allow_mutation_probes:
+              *, query: Optional[Mapping[str, str]] = None,
+              permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        if permit is not None:
+            self._authorize_mutation(permit)
+        elif not (self._allow_mutation_probes and self.environment == "recorded"):
+            # Replaying a recorded mutation probe is engineering. Doing it against a real endpoint
+            # is a real order, and it never happens: a recorded probe is only ever permitted on a
+            # recorded fixture, whose transport cannot open a socket.
             raise NotExercised(
-                f"upstox {capability!r} mutates broker state and this channel was not opened with "
-                f"allow_mutation_probes=True; the capability stays UNVERIFIED rather than assumed")
+                f"upstox {capability!r} would mutate broker state; only a recorded engineering "
+                f"fixture with allow_mutation_probes=True may replay it, and a real order requires "
+                f"an owner-signed mutation permit at stage {MUTATION_REQUIRES_STAGE}")
         path = self._PATHS.get(capability)
         if path is None:
             raise BrokerChannelError(f"upstox exposes no endpoint for {capability!r}")
@@ -369,10 +482,12 @@ class UpstoxChannel(BrokerChannel):
         return normalize_upstox_order_status(
             self._get("order_status", query={"order_tag": client_order_id}))
 
-    def submit(self, *, client_order_id: str, representation: Mapping[str, Any]) -> Mapping[str, Any]:
+    def submit(self, *, client_order_id: str, representation: Mapping[str, Any],
+               permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        self._authorize_mutation(permit)
         body = dict(representation)
         body["tag"] = client_order_id
-        data = upstox_envelope(self._post("order_submission", body))
+        data = upstox_envelope(self._post("order_submission", body, permit=permit))
         if not isinstance(data, Mapping):
             raise BrokerChannelError("malformed upstox order acknowledgement")
         ids = data.get("order_ids")
@@ -382,9 +497,12 @@ class UpstoxChannel(BrokerChannel):
         return {"broker_order_id": str(ids[0]), "client_order_id": client_order_id,
                 "state": ExecutionState.BROKER_ACKNOWLEDGED.value}
 
-    def cancel(self, *, broker_order_id: str, reason: str) -> Mapping[str, Any]:
+    def cancel(self, *, broker_order_id: str, reason: str,
+               permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        self._authorize_mutation(permit)
         data = upstox_envelope(self._post("order_cancel",
-                                          {"order_id": str(broker_order_id), "reason": str(reason)[:100]}))
+                                          {"order_id": str(broker_order_id),
+                                           "reason": str(reason)[:100]}, permit=permit))
         return {"broker_order_id": str(broker_order_id), "state": ExecutionState.CANCELLED.value,
                 "broker_response": data if isinstance(data, Mapping) else {}}
 
@@ -457,15 +575,17 @@ class UpstoxChannel(BrokerChannel):
         return {"recent_order_count": len(self.open_orders())}
 
     def probe_order_submission(self) -> Mapping[str, Any]:
-        # Refuses unless mutation probes were explicitly enabled in a non-live environment.
+        # Refuses unless mutation probes were explicitly enabled on a recorded engineering fixture.
         self._post("order_submission", {"quantity": 1, "tradingsymbol": "SBIN",
                                         "transaction_type": "BUY", "order_type": "MARKET",
                                         "product": "D", "validity": "DAY"})
-        return {"mutation_probe": "executed in sandbox"}
+        return {"mutation_probe": "replayed against a recorded transcript",
+                "reached_a_broker": False, "portfolio_state_created": False}
 
     def probe_order_cancel(self) -> Mapping[str, Any]:
         self._post("order_cancel", {"order_id": "conformance-probe", "reason": "conformance"})
-        return {"mutation_probe": "executed in sandbox"}
+        return {"mutation_probe": "replayed against a recorded transcript",
+                "reached_a_broker": False, "portfolio_state_created": False}
 
     def probe_order_replace(self) -> Mapping[str, Any]:
         raise BrokerChannelError("upstox order modification is not exercised by this channel")
@@ -492,8 +612,8 @@ class UpstoxChannel(BrokerChannel):
 # ---------------------------------------------------------------------------
 
 ALPACA_LIVE_BASE = "https://api.alpaca.markets"
-ALPACA_PAPER_BASE = "https://paper-api.alpaca.markets"
 ALPACA_ACCOUNT_PATH = "/v2/account"
+ALPACA_ASSETS_PATH = "/v2/assets/{symbol}"
 ALPACA_POSITIONS_PATH = "/v2/positions"
 ALPACA_ORDERS_PATH = "/v2/orders"
 ALPACA_ORDER_PATH = "/v2/orders/{order_id}"
@@ -575,11 +695,17 @@ _ALPACA_STATES = {"new": "BROKER_ACKNOWLEDGED", "accepted": "BROKER_ACKNOWLEDGED
                   "expired": "EXPIRED", "rejected": "REJECTED", "pending_cancel": "CANCEL_PENDING"}
 
 
-class AlpacaChannel(BrokerChannel):
-    """Alpaca Trading API over its documented REST interface, with its paper endpoint by default."""
+class AlpacaChannel(_LiveBrokerChannel):
+    """Alpaca Trading API over its documented REST interface, pointed at the LIVE endpoint.
+
+    There is no paper endpoint on this channel and no way to select one.
+    """
 
     broker_id = "alpaca"
     VENUE = "US"
+    _CLOCK_PATH = ALPACA_CLOCK_PATH
+
+    _PATHS_ASSETS = {"instrument": ALPACA_ASSETS_PATH}
 
     _PATHS = {
         "broker_identity": ALPACA_ACCOUNT_PATH, "auth_state": ALPACA_ACCOUNT_PATH,
@@ -591,14 +717,16 @@ class AlpacaChannel(BrokerChannel):
         "order_replace": ALPACA_ORDER_PATH,
     }
 
-    def __init__(self, *, environment: str = "paper", api_key: Optional[str] = None,
+    def __init__(self, *, environment: str = "live", api_key: Optional[str] = None,
                  api_secret: Optional[str] = None, transport: Optional[_HttpTransport] = None,
                  allow_mutation_probes: bool = False) -> None:
-        if environment not in {"paper", "live"}:
-            raise BrokerChannelError("alpaca environment must be paper or live")
+        if environment not in LIVE_ENVIRONMENTS:
+            raise BrokerChannelError(
+                f"alpaca environment must be one of {LIVE_ENVIRONMENTS}; the paper endpoint does "
+                f"not exist on this channel")
         self.environment = environment
-        self.base_url = ALPACA_LIVE_BASE if environment == "live" else ALPACA_PAPER_BASE
-        if not (api_key and api_secret) and transport is None:
+        self.base_url = ALPACA_LIVE_BASE if environment == "live" else RECORDED_BASE
+        if environment == "live" and not (api_key and api_secret) and transport is None:
             raise BrokerChannelError(
                 "an alpaca channel needs an API key pair or an explicit transport; this repository "
                 "ships no credential and no way to obtain one")
@@ -606,9 +734,10 @@ class AlpacaChannel(BrokerChannel):
         self._api_secret = (api_secret or "").strip()
         self._transport = transport or _HttpTransport()
         self._allow_mutation_probes = bool(allow_mutation_probes)
-        if self._allow_mutation_probes and environment == "live":
+        if self._allow_mutation_probes and environment != "recorded":
             raise BrokerChannelError(
-                "mutation probes are never run against a live endpoint")
+                "mutation probes place and cancel real orders; they are refused outside a recorded "
+                "engineering fixture and are never a readiness check")
 
     def interface_for(self, capability: str) -> str:
         path = self._PATHS.get(capability)
@@ -617,6 +746,57 @@ class AlpacaChannel(BrokerChannel):
     @property
     def _headers(self) -> Dict[str, str]:
         return {"APCA-API-KEY-ID": self._api_key, "APCA-API-SECRET-KEY": self._api_secret}
+
+    def _read_headers(self) -> Dict[str, str]:
+        return self._headers
+
+    def instrument(self, symbol: str) -> Mapping[str, Any]:
+        """Read instrument metadata. Availability is verified here, never assumed."""
+        path = ALPACA_ASSETS_PATH.replace("{symbol}", urllib.parse.quote(symbol.strip().upper()))
+        payload = self._transport.request("GET", f"{self.base_url}{path}",
+                                          headers=self._headers)["payload"]
+        if not isinstance(payload, Mapping):
+            raise BrokerChannelError("alpaca asset metadata is unusable")
+        asset_class = str(payload.get("class") or payload.get("asset_class") or "")
+        if asset_class and asset_class.upper() not in {"US_EQUITY"}:
+            raise BrokerChannelError(
+                f"{symbol} is class {asset_class}, not a US equity; this mandate is long-only "
+                f"US equity cash")
+        return {"symbol": str(payload.get("symbol") or symbol),
+                "status": str(payload.get("status") or "ACTIVE"),
+                "exchange": str(payload.get("exchange") or "UNKNOWN"),
+                "class": asset_class or "US_EQUITY",
+                "tradable": bool(payload.get("tradable", True))}
+
+    def restrictions(self) -> Mapping[str, Any]:
+        """Read the account's own restriction flags from the account document."""
+        payload = self._get("account")
+        if not isinstance(payload, Mapping):
+            raise BrokerChannelError("alpaca account payload is unusable")
+        for name in ("pattern_day_trader", "trading_blocked", "account_blocked",
+                     "transfers_blocked"):
+            if name not in payload:
+                raise BrokerChannelError(f"alpaca account payload is missing {name}")
+        return {
+            "trading_enabled": not (payload["trading_blocked"] or payload["account_blocked"]),
+            "account_type": str(payload.get("account_type") or ""),
+            "pdt_rule": bool(payload.get("pattern_day_trader")),
+            "shorting": bool(payload.get("shorting_enabled", False)),
+            "transfers_blocked": bool(payload["transfers_blocked"]),
+            "blocked_instruments": list(payload.get("blocked_instruments") or ()),
+        }
+
+    def market_data_entitlement(self) -> Mapping[str, Any]:
+        """Report the broker-side data subscription backing this account."""
+        payload = self._get("account")
+        status = str((payload or {}).get("status") or "").upper()
+        sip = bool((payload or {}).get("sip_data_enabled", False))
+        if status != "ACTIVE" or not sip:
+            return {"entitled": False,
+                    "detail": f"account status={status or 'unknown'} sip={sip}",
+                    "source": "alpaca account document"}
+        return {"entitled": True, "source": "alpaca account document",
+                "symbols": list(REQUIRED_INSTRUMENTS)}
 
     def _get(self, capability: str, *, order_id: str = "",
              query: Optional[Mapping[str, str]] = None) -> Mapping[str, Any]:
@@ -633,30 +813,41 @@ class AlpacaChannel(BrokerChannel):
         return self._transport.request("GET", url, headers=self._headers)["payload"]
 
     def _post(self, capability: str, body: Mapping[str, Any], *,
-              order_id: str = "") -> Mapping[str, Any]:
-        if not self._allow_mutation_probes:
+              order_id: str = "",
+              permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        if permit is not None:
+            self._authorize_mutation(permit)
+        elif not (self._allow_mutation_probes and self.environment == "recorded"):
             raise NotExercised(
-                f"alpaca {capability!r} mutates broker state and this channel was not opened with "
-                f"allow_mutation_probes=True; the capability stays UNVERIFIED rather than assumed")
+                f"alpaca {capability!r} would mutate broker state; only a recorded engineering "
+                f"fixture with allow_mutation_probes=True may replay it, and a real order requires "
+                f"an owner-signed mutation permit at stage {MUTATION_REQUIRES_STAGE}")
         path = self._PATHS[capability].replace("{order_id}", urllib.parse.quote(order_id))
         return self._transport.request("POST", f"{self.base_url}{path}",
                                        headers=self._headers, json_body=body)["payload"]
 
-    def _patch(self, capability: str, body: Mapping[str, Any], *, order_id: str) -> Mapping[str, Any]:
+    def _patch(self, capability: str, body: Mapping[str, Any], *,
+               order_id: str) -> Mapping[str, Any]:
         # Alpaca replaces a working order with POST /v2/orders/{order_id}; cancellation is DELETE
         # on the same path. Keeping the two distinct is the whole point of broker-specific mapping.
-        if not self._allow_mutation_probes:
+        if not (self._allow_mutation_probes and self.environment == "recorded"):
             raise NotExercised(
-                "alpaca order modification mutates broker state; the capability stays UNVERIFIED")
+                "alpaca order modification mutates broker state; only a recorded engineering "
+                "fixture may replay it, and a real modification requires a mutation permit")
         path = self._PATHS[capability].replace("{order_id}", urllib.parse.quote(order_id))
         return self._transport.request("POST", f"{self.base_url}{path}",
                                        headers=self._headers, json_body=body)["payload"]
 
-    def _delete(self, capability: str, body: Mapping[str, Any], *, order_id: str) -> Mapping[str, Any]:
-        if not self._allow_mutation_probes:
+    def _delete(self, capability: str, body: Mapping[str, Any], *,
+                order_id: str,
+                permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        if permit is not None:
+            self._authorize_mutation(permit)
+        elif not (self._allow_mutation_probes and self.environment == "recorded"):
             raise NotExercised(
-                f"alpaca {capability!r} mutates broker state and this channel was not opened with "
-                f"allow_mutation_probes=True; the capability stays UNVERIFIED rather than assumed")
+                f"alpaca {capability!r} would mutate broker state; only a recorded engineering "
+                f"fixture with allow_mutation_probes=True may replay it, and a real cancellation "
+                f"requires an owner-signed mutation permit at stage {MUTATION_REQUIRES_STAGE}")
         path = self._PATHS[capability].replace("{order_id}", urllib.parse.quote(order_id))
         return self._transport.request("DELETE", f"{self.base_url}{path}",
                                        headers=self._headers, json_body=body)["payload"]
@@ -686,17 +877,21 @@ class AlpacaChannel(BrokerChannel):
         return normalize_alpaca_order_status(
             self._get("order_status", query={"client_order_id": client_order_id}))
 
-    def submit(self, *, client_order_id: str, representation: Mapping[str, Any]) -> Mapping[str, Any]:
+    def submit(self, *, client_order_id: str, representation: Mapping[str, Any],
+               permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        self._authorize_mutation(permit)
         body = dict(representation)
         body["client_order_id"] = client_order_id
-        payload = self._post("order_submission", body)
+        payload = self._post("order_submission", body, permit=permit)
         if not isinstance(payload, Mapping) or not str(payload.get("id") or "").strip():
             raise BrokerChannelError("alpaca did not return a verifiable order id")
         return {"broker_order_id": str(payload["id"]), "client_order_id": client_order_id,
                 "state": _alpaca_state(str(payload.get("status") or ""))}
 
-    def cancel(self, *, broker_order_id: str, reason: str) -> Mapping[str, Any]:
-        payload = self._delete("order_cancel", {}, order_id=broker_order_id)
+    def cancel(self, *, broker_order_id: str, reason: str,
+               permit: Optional[LiveMutationPermit] = None) -> Mapping[str, Any]:
+        self._authorize_mutation(permit)
+        payload = self._delete("order_cancel", {}, order_id=broker_order_id, permit=permit)
         return {"broker_order_id": str(broker_order_id), "state": ExecutionState.CANCELLED.value,
                 "reason": reason[:100],
                 "broker_status": str(payload.get("status") or "") if isinstance(payload, Mapping) else ""}
@@ -767,11 +962,13 @@ class AlpacaChannel(BrokerChannel):
     def probe_order_submission(self) -> Mapping[str, Any]:
         self._post("order_submission", {"symbol": "SPY", "qty": "1", "side": "buy",
                                         "type": "market", "time_in_force": "day"})
-        return {"mutation_probe": "executed in paper"}
+        return {"mutation_probe": "replayed against a recorded transcript",
+                "reached_a_broker": False, "portfolio_state_created": False}
 
     def probe_order_cancel(self) -> Mapping[str, Any]:
         self._delete("order_cancel", {}, order_id="conformance-probe")
-        return {"mutation_probe": "executed in paper"}
+        return {"mutation_probe": "replayed against a recorded transcript",
+                "reached_a_broker": False, "portfolio_state_created": False}
 
     def probe_order_replace(self) -> Mapping[str, Any]:
         payload = self._patch("order_replace", {"qty": "2"}, order_id="conformance-probe")
@@ -804,6 +1001,57 @@ def _alpaca_state(raw: str) -> str:
         raise BrokerChannelError(f"unmapped alpaca order state {raw!r}") from None
 
 
+class LiveAccountReadOnlyView:
+    """The ONLY surface readiness verification ever sees.
+
+    It wraps a real channel and exposes the ten reads - and nothing else. No ``submit``, no
+    ``cancel``, no ``replace``. Handing this object to a verifier means the verifier structurally
+    cannot mutate the account it is inspecting, which is what makes "read-only before
+    LIVE_ENABLED" a property of the code rather than a promise in a comment.
+    """
+
+    def __init__(self, channel: Any) -> None:
+        self._channel = channel
+
+    @property
+    def broker_id(self) -> str:
+        return str(getattr(self._channel, "broker_id", "unknown"))
+
+    @property
+    def environment(self) -> str:
+        return str(getattr(self._channel, "environment", "live"))
+
+    def health(self) -> Any:
+        return self._channel.health()
+
+    def account(self) -> Any:
+        return self._channel.account()
+
+    def positions(self) -> Sequence[Any]:
+        return self._channel.positions()
+
+    def open_orders(self) -> Sequence[Mapping[str, Any]]:
+        return self._channel.open_orders()
+
+    def recent_orders(self) -> Sequence[Mapping[str, Any]]:
+        return self._channel.recent_orders()
+
+    def instrument(self, symbol: str) -> Mapping[str, Any]:
+        return self._channel.instrument(symbol)
+
+    def clock(self) -> Mapping[str, Any]:
+        return self._channel.clock()
+
+    def restrictions(self) -> Mapping[str, Any]:
+        return self._channel.restrictions()
+
+    def probe_error_behaviour(self) -> Mapping[str, Any]:
+        return self._channel.probe_error_behaviour()
+
+    def market_data_entitlement(self) -> Mapping[str, Any]:
+        return self._channel.market_data_entitlement()
+
+
 def _clock_skew_seconds(headers: Mapping[str, Any]) -> float:
     """Server clock skew from a response Date header. Absent or unparseable means zero evidence."""
     raw = str(headers.get("date") or "").strip()
@@ -822,13 +1070,15 @@ def _clock_skew_seconds(headers: Mapping[str, Any]) -> float:
 
 __all__ = [
     "ALPACA_LIVE_BASE",
-    "ALPACA_PAPER_BASE",
+    "LIVE_ENVIRONMENTS",
     "MAX_RESPONSE_BYTES",
+    "PERMITTED_MUTATION_ENVIRONMENTS",
+    "RECORDED_BASE",
     "UPSTOX_LIVE_TRADE_BASE",
-    "UPSTOX_SANDBOX_TRADE_BASE",
     "AlpacaChannel",
     "BrokerChannel",
     "BrokerChannelError",
+    "LiveAccountReadOnlyView",
     "RecordedTransport",
     "UpstoxChannel",
     "normalize_alpaca_account",
