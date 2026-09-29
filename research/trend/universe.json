@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "classes": {
+    "equity": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "EFA",
+      "EEM"
+    ],
+    "bonds": [
+      "TLT",
+      "IEF",
+      "LQD",
+      "HYG"
+    ],
+    "commodities": [
+      "GLD",
+      "SLV",
+      "DBC",
+      "USO",
+      "DBA"
+    ],
+    "currency": [
+      "UUP",
+      "FXE",
+      "FXY"
+    ],
+    "real_estate": [
+      "VNQ"
+    ]
+  },
+  "minimum_valid_assets": 10,
+  "minimum_history_years": 15,
+  "required_periods": [
+    "2008-01-01/2009-12-31",
+    "2022-01-01/2022-12-31"
+  ]
+}

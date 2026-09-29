@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "unit": "basis_points_per_side",
+  "base_cost_bps": {
+    "equity": 3,
+    "bonds": 5,
+    "commodities": 8,
+    "currency": 8,
+    "real_estate": 5
+  },
+  "stress_multipliers": [
+    1,
+    2,
+    4
+  ],
+  "turnover_cost_rule": "sum(abs(target_weight - prior_weight)) * per_side_cost_bps / 10000",
+  "apply_on_each_rebalance": true
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "verdicts": [
+    "EVIDENCE_PASS",
+    "EVIDENCE_FAIL",
+    "INSUFFICIENT_DATA"
+  ],
+  "insufficient_data": {
+    "minimum_valid_assets": 10,
+    "minimum_history_years": 15,
+    "must_cover": [
+      "2008-01-01/2009-12-31",
+      "2022-01-01/2022-12-31"
+    ]
+  },
+  "pass_all_required": [
+    {
+      "metric": "net_cagr_2x_costs",
+      "operator": ">",
+      "value": 0
+    },
+    {
+      "metric": "max_drawdown_2x_costs",
+      "operator": "<=",
+      "value": 0.2
+    },
+    {
+      "metric": "max_drawdown_2x_costs",
+      "operator": "<=",
+      "benchmark": "SPY_BUY_AND_HOLD"
+    },
+    {
+      "metric": "net_sharpe_2x_costs",
+      "operator": ">=",
+      "value": 0.5
+    },
+    {
+      "metric": "calmar_2x_costs",
+      "operator": ">",
+      "benchmark": "SPY_BUY_AND_HOLD"
+    },
+    {
+      "metric": "rolling_3y_positive_pct_2x_costs",
+      "operator": ">=",
+      "value": 0.6
+    },
+    {
+      "metric": "robustness_grid_positive_fraction_2x_costs",
+      "operator": ">=",
+      "value": 0.75
+    },
+    {
+      "metric": "bootstrap_sharpe_5th_percentile_2x_costs",
+      "operator": ">",
+      "value": 0
+    }
+  ],
+  "no_post_hoc_tuning": true,
+  "changes_after_first_result_require_new_trial": true
+}

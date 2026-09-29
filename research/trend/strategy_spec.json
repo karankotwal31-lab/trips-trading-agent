@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "strategy_id": "TRIPS_TREND_EVIDENCE_V1",
+  "frequency": "daily",
+  "direction": "long_only",
+  "signal": {
+    "field": "adj_close",
+    "rule": "adj_close > simple_moving_average(adj_close, lookback)",
+    "lookback_days": 252,
+    "off_when_not_strictly_above": true
+  },
+  "volatility": {
+    "field": "adj_close",
+    "returns": "simple_return",
+    "window_days": 60,
+    "annualization_days": 252,
+    "target_portfolio_volatility": 0.1
+  },
+  "sizing": {
+    "method": "inverse_volatility",
+    "per_asset_cap": 0.2,
+    "per_class_cap": 0.4,
+    "gross_cap": 1,
+    "leverage": false,
+    "shorting": false,
+    "residual_cash_allowed": true,
+    "cash_annual_return": 0
+  },
+  "rebalance": {
+    "frequency": "monthly",
+    "decision_time": "month_end_close_t",
+    "execution_time": "next_available_close_t_plus_1",
+    "causal_lag_trading_days": 1,
+    "no_same_bar_execution": true
+  },
+  "robustness_grid": {
+    "signal_lookback_days": [
+      126,
+      189,
+      252,
+      315
+    ],
+    "volatility_window_days": [
+      40,
+      60,
+      90
+    ],
+    "report_only": true
+  },
+  "bootstrap": {
+    "method": "seeded_moving_block_bootstrap",
+    "seed": 20260930,
+    "block_length_trading_days": 21,
+    "replications": 1000
+  },
+  "benchmarks": [
+    "SPY_BUY_AND_HOLD",
+    "EQUAL_WEIGHT_UNIVERSE",
+    "60_40_SPY_IEF"
+  ],
+  "engine_imports_forbidden": true
+}
