@@ -34,7 +34,7 @@ from market_time import closed_bars_only
 from providers import Bar, get_provider
 from truth_guard import DataVerdict, validate_bars
 
-from .contracts import ExecutionLayerError
+from .contracts import ExecutionLayerError, canonical_json
 from .exchange_calendar import default_us_equity_calendar
 from .provenance import DataPurpose, DataSourceGuard, DataSourceRecord, ProvenanceViolation
 from .session import SessionCalendar, SessionStatus
@@ -65,6 +65,103 @@ class MarketDataError(ExecutionLayerError):
 
 class ProviderCredentialMissing(ExecutionLayerError):
     """A production provider needs a credential this repository deliberately does not hold."""
+
+
+PRODUCTION_DATA_EVIDENCE_KIND = "PRODUCTION_MARKET_DATA_VERIFICATION"
+PRODUCTION_DATA_EVIDENCE_VERSION = 1
+PRODUCTION_DATA_MAX_AGE_SECONDS = 15 * 60
+REQUIRED_PRODUCTION_SYMBOLS: Tuple[str, ...] = ("SPY", "QQQ", "AAPL")
+
+
+@dataclass(frozen=True)
+class ProductionDataRecord:
+    """One symbol's read-only dual-source verification result. Never releases capital."""
+
+    symbol: str
+    passed: bool
+    detail: str
+    primary_integrity_hash: str = ""
+    secondary_integrity_hash: str = ""
+    cross_source: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        normalized = str(self.symbol).strip().upper()
+        if normalized not in REQUIRED_PRODUCTION_SYMBOLS:
+            raise MarketDataError(f"{normalized!r} is outside the approved data scope")
+        object.__setattr__(self, "symbol", normalized)
+        object.__setattr__(self, "cross_source", dict(self.cross_source))
+
+
+@dataclass(frozen=True)
+class ProductionMarketDataVerification:
+    """Evidence that two independent real-time provider families serve the approved 60m scope."""
+
+    generated_at: str
+    primary_provider: str
+    primary_family: str
+    secondary_provider: str
+    secondary_family: str
+    interval: str
+    records: Mapping[str, ProductionDataRecord] = field(default_factory=dict)
+    evidence_kind: str = PRODUCTION_DATA_EVIDENCE_KIND
+    schema_version: int = PRODUCTION_DATA_EVIDENCE_VERSION
+
+    def __post_init__(self) -> None:
+        if self.evidence_kind != PRODUCTION_DATA_EVIDENCE_KIND:
+            raise MarketDataError("production market-data evidence kind is invalid")
+        if self.interval != APPROVED_INTERVAL:
+            raise MarketDataError(f"production data interval must be {APPROVED_INTERVAL}")
+        if not self.primary_family or not self.secondary_family:
+            raise MarketDataError("both provider families are required")
+        if self.primary_family == self.secondary_family:
+            raise MarketDataError("production providers must be independent families")
+        try:
+            parsed = datetime.fromisoformat(str(self.generated_at).replace("Z", "+00:00"))
+        except Exception as exc:
+            raise MarketDataError("production data generated_at is not ISO-8601") from exc
+        if parsed.tzinfo is None:
+            raise MarketDataError("production data generated_at must be timezone-aware")
+        object.__setattr__(self, "records", dict(self.records))
+
+    @property
+    def missing_symbols(self) -> Tuple[str, ...]:
+        return tuple(symbol for symbol in REQUIRED_PRODUCTION_SYMBOLS if symbol not in self.records)
+
+    @property
+    def failed_symbols(self) -> Tuple[str, ...]:
+        return tuple(symbol for symbol in REQUIRED_PRODUCTION_SYMBOLS
+                     if symbol in self.records and not self.records[symbol].passed)
+
+    @property
+    def verified(self) -> bool:
+        return not self.missing_symbols and not self.failed_symbols
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "evidence_kind": self.evidence_kind,
+            "schema_version": self.schema_version,
+            "generated_at": self.generated_at,
+            "primary_provider": self.primary_provider,
+            "primary_family": self.primary_family,
+            "secondary_provider": self.secondary_provider,
+            "secondary_family": self.secondary_family,
+            "interval": self.interval,
+            "verified": self.verified,
+            "missing_symbols": list(self.missing_symbols),
+            "failed_symbols": list(self.failed_symbols),
+            "records": {
+                symbol: {
+                    "symbol": record.symbol,
+                    "passed": record.passed,
+                    "detail": record.detail,
+                    "primary_integrity_hash": record.primary_integrity_hash,
+                    "secondary_integrity_hash": record.secondary_integrity_hash,
+                    "cross_source": dict(record.cross_source),
+                }
+                for symbol, record in sorted(self.records.items())
+            },
+            "releases_capital": False,
+        }
 
 
 def provider_credential_status(provider_name: str, *, environ: Optional[Mapping[str, str]] = None
