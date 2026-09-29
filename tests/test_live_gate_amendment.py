@@ -139,7 +139,7 @@ def verified_basis():
     return release_basis_from_verdict(verdict)
 
 
-def test_task_kernel():
+def _task_kernel_fixture():
     """Test-only TASK policy. These values are fixtures, never production defaults."""
     policy = TASKPolicy(
         policy_version="live-route-test-only",
@@ -161,7 +161,7 @@ def test_task_kernel():
     return TASKKernel(policy, approved_policy_hash=fingerprint_task_policy(policy))
 
 
-def test_task_context(*, decision, now):
+def _task_context_fixture(*, decision, now):
     return TASKContext(
         market_data_healthy=True,
         venue_state="OPEN",
@@ -198,8 +198,8 @@ def live_ready_router(*, basis=None, stage=Stage.LIVE_LOCKED, requested_bars=240
         secondary_provider=base.TestProvider("b", "fam_b", bars=bars),
         session_calendar=base.session_calendar(), expected_account_id="ACCT-1",
         expected_environment="TEST_ENV", requested_bars=requested_bars,
-        task_kernel=test_task_kernel() if task_enabled else None,
-        task_context_provider=test_task_context if task_enabled else None)
+        task_kernel=_task_kernel_fixture() if task_enabled else None,
+        task_context_provider=_task_context_fixture if task_enabled else None)
     return router, adapter
 
 
