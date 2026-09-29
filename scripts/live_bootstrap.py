@@ -27,19 +27,21 @@ def main() -> int:
         help="perform read-only broker/account and market-data verification")
     parser.add_argument(
         "--strict", action="store_true",
-        help="exit non-zero unless external verification and owner inputs are complete")
+        help="exit non-zero unless requested external broker/data verification is complete")
+    parser.add_argument(
+        "--require-owner-inputs", action="store_true",
+        help="also require configured owner public key and a valid owner Governor profile")
     args = parser.parse_args()
 
     report = production_bootstrap_status(verify_external=args.verify_external)
     print(json.dumps(report, indent=2, sort_keys=True, default=str))
 
-    if args.strict:
-        if not report["external_verification_complete"]:
-            return 2
-        if not report["owner_inputs_complete"]:
-            return 3
-        if report["releases_capital"] or report["places_orders"]:
-            return 4
+    if args.strict and not report["external_verification_complete"]:
+        return 2
+    if args.require_owner_inputs and not report["owner_inputs_complete"]:
+        return 3
+    if report["releases_capital"] or report["places_orders"]:
+        return 4
     return 0
 
 
