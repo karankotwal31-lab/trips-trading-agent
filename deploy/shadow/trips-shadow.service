@@ -1,0 +1,20 @@
+[Unit]
+Description=Trip's research-only daily shadow runner
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=trips-shadow
+Group=trips-shadow
+WorkingDirectory=/opt/trips-trading-agent
+ExecStart=/usr/bin/python3 research/shadow/runner.py --data-dir /var/lib/trips-shadow/data/daily --journal /var/lib/trips-shadow/state/journal.jsonl --heartbeat /var/lib/trips-shadow/state/heartbeat.json
+ExecStartPost=/usr/bin/python3 research/shadow/shadow_report.py --data-dir /var/lib/trips-shadow/data/daily --journal /var/lib/trips-shadow/state/journal.jsonl --output /var/lib/trips-shadow/state/forward_report.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/trips-shadow
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
