@@ -41,6 +41,7 @@ from .gateway import IdempotencyLedger, SubmissionOutcome, UniversalBrokerGatewa
 from .preflight import HealthGateEvidence, LiveEnvironmentAttestation, PreflightEvaluator
 from .reconciliation import ReconciliationEngine
 from .supervisor import SafetyController
+from .task_safety_kernel import TradeProposal
 
 JOURNAL_FILE = "cycle_route_journal.json"
 JOURNAL_SCHEMA_VERSION = 1
@@ -51,6 +52,7 @@ NO_DECISION_PRICE = "NO_DECISION_PRICE"
 STALE_DECISION = "STALE_DECISION"
 NOT_SIZED = "NOT_SIZED"
 NOT_ACTIONABLE = "NOT_ACTIONABLE"
+TASK_BLOCKED = "TASK_BLOCKED"
 
 
 @dataclass(frozen=True)
@@ -194,6 +196,7 @@ class CycleRouter:
                  expected_environment: str, policy: Optional[IntentPolicy] = None,
                  ledger: Optional[IdempotencyLedger] = None,
                  safety: Optional[SafetyController] = None,
+                 task_kernel: Any = None, task_context_provider: Any = None,
                  secondary_provider: Any = None, data_guard: Any = None,
                  reconciliation: Optional[ReconciliationEngine] = None,
                  requested_bars: int = 240) -> None:
@@ -212,6 +215,8 @@ class CycleRouter:
         self._reconciliation = reconciliation or ReconciliationEngine()
         self._policy = policy or IntentPolicy()
         self._safety = safety or SafetyController()
+        self._task_kernel = task_kernel
+        self._task_context_provider = task_context_provider
         self._ledger = ledger or IdempotencyLedger()
         self._gateway = UniversalBrokerGateway(
             adapter=adapter, governor=governor, lifecycle=lifecycle, ledger=self._ledger,
@@ -368,6 +373,16 @@ class CycleRouter:
                 supervisor_available=supervisor_available)
             return probe, report
 
+        # A live-money route may never bypass TASK. Existing locked/research routes remain
+        # runnable without an owner-approved TASK policy so the safety kernel can be developed and
+        # tested before it is configured. The moment lifecycle reaches LIVE_ENABLED, absence of
+        # TASK itself is a deterministic refusal.
+        stage = getattr(getattr(self._lifecycle, "stage", None), "value", None)
+        if stage == "LIVE_ENABLED" and self._task_kernel is None:
+            return record(
+                TASK_BLOCKED, ExecutionState.REFUSED.value,
+                notes=("LIVE_ENABLED requires an owner-approved TASK safety kernel; none is configured",))
+
         # Phase 1: let the FROZEN risk engine state the authorized size. No reimplementation.
         probe_intent, probe_report = evaluate(1)
         authorized = int((probe_report.artifacts or {}).get("authorized_quantity", 0))
@@ -376,7 +391,53 @@ class CycleRouter:
                           preflight=probe_report,
                           notes=("the frozen risk engine authorized zero size for this decision",))
 
-        # Phase 2: build the real intent at exactly the frozen authorization and re-run preflight so
+        # TASK is deliberately between sizing and immutable intent creation. It may preserve the
+        # frozen Risk quantity, reduce it, or block it; it may never increase it. This placement
+        # keeps adaptive guardrails out of strategy logic without allowing an adapter/gateway to
+        # mutate an already-authorized economic intent.
+        task_notes: List[str] = []
+        if self._task_kernel is not None:
+            if self._task_context_provider is None:
+                return record(
+                    TASK_BLOCKED, ExecutionState.REFUSED.value,
+                    intent_id=probe_intent.intent_id, preflight=probe_report,
+                    notes=("TASK is configured but no execution-context provider is configured",))
+            try:
+                task_context = self._task_context_provider(decision=decision, now=now)
+                task_proposal = TradeProposal(
+                    symbol=decision.symbol,
+                    side=decision.side,
+                    desired_quantity=authorized,
+                    order_type=self._policy.order_type,
+                    limit_price=None,
+                    reference_price=decision.decision_price,
+                    strategy_id=decision.strategy,
+                )
+                task_decision = self._task_kernel.evaluate(
+                    task_proposal, context=task_context, now=now)
+            except Exception as exc:
+                return record(
+                    TASK_BLOCKED, ExecutionState.REFUSED.value,
+                    intent_id=probe_intent.intent_id, preflight=probe_report,
+                    notes=(f"TASK evaluation failed closed: {type(exc).__name__}",))
+
+            if (not task_decision.allowed) or task_decision.approved_quantity <= 0:
+                return record(
+                    TASK_BLOCKED, ExecutionState.REFUSED.value,
+                    intent_id=probe_intent.intent_id, preflight=probe_report,
+                    notes=tuple(task_decision.blocks) or ("TASK refused new exposure",))
+            if task_decision.approved_quantity > authorized:
+                return record(
+                    TASK_BLOCKED, ExecutionState.REFUSED.value,
+                    intent_id=probe_intent.intent_id, preflight=probe_report,
+                    notes=("TASK attempted to increase frozen Risk authority; refused",))
+            if task_decision.approved_quantity < authorized:
+                task_notes.append(
+                    f"TASK reduced quantity {authorized}->{task_decision.approved_quantity}")
+            task_notes.extend(task_decision.advisories)
+            authorized = int(task_decision.approved_quantity)
+
+        # Phase 2: build the real intent at exactly the safe authorization and re-run preflight so
         # the report is bound to the intent that is actually submitted.
         intent, report = evaluate(authorized)
         submission = self._gateway.submit(
@@ -397,7 +458,7 @@ class CycleRouter:
             quantity=intent.quantity, outcome=submission.outcome, state=submission.state,
             transmitted=submission.transmitted, preflight_passed=bool(report.passed),
             failing_preconditions=tuple(report.failing), failing_permissions=failing_permissions,
-            gate_decision=gate_decision, notes=tuple(submission.reasons))
+            gate_decision=gate_decision, notes=tuple(task_notes) + tuple(submission.reasons))
 
     # -- durable journal --------------------------------------------------
 

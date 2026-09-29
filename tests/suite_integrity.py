@@ -37,6 +37,7 @@ PINNED_FILES = (
     "tests/test_student_engine.py",
     "tests/test_student_integration.py",
     "tests/test_execution_layer.py",
+    "tests/test_task_safety_kernel.py",
     "tests/test_live_gate_amendment.py",
     "tests/test_live_readiness.py",
     "tests/test_execution_evidence.py",

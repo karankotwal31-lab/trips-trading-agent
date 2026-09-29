@@ -86,6 +86,12 @@ from execution import (  # noqa: E402
     verify_amendment,
 )
 from providers import DemoProvider  # noqa: E402
+from execution.task_safety_kernel import (  # noqa: E402
+    TASKContext,
+    TASKKernel,
+    TASKPolicy,
+    fingerprint_policy as fingerprint_task_policy,
+)
 
 LIVE_TEST_PROFILE = base.LIVE_TEST_PROFILE
 
@@ -133,9 +139,48 @@ def verified_basis():
     return release_basis_from_verdict(verdict)
 
 
+def _task_kernel_fixture():
+    """Test-only TASK policy. These values are fixtures, never production defaults."""
+    policy = TASKPolicy(
+        policy_version="live-route-test-only",
+        max_price_deviation_bps=100.0,
+        max_spread_bps=100.0,
+        max_adv_participation_pct=1.0,
+        max_messages_per_second=100,
+        max_repeated_executions=100,
+        repeated_execution_window_seconds=60,
+        first_notice_buffer_days=0,
+        last_trade_buffer_days=0,
+        require_cancel_on_disconnect=False,
+        require_self_match_prevention=True,
+        allow_unbounded_market_orders=True,
+        permitted_order_types=("MARKET",),
+        allowed_venue_states=("OPEN",),
+        required_compliance_checks=(),
+    )
+    return TASKKernel(policy, approved_policy_hash=fingerprint_task_policy(policy))
+
+
+def _task_context_fixture(*, decision, now):
+    return TASKContext(
+        market_data_healthy=True,
+        venue_state="OPEN",
+        observed_price=decision.decision_price,
+        spread_bps=1.0,
+        average_daily_volume=1_000_000.0,
+        broker_connected=True,
+        cancel_on_disconnect_active=True,
+        instrument_kind="CASH",
+        working_orders=(),
+        recent_message_times=(),
+        recent_execution_times=(),
+        compliance={},
+    )
+
+
 def live_ready_router(*, basis=None, stage=Stage.LIVE_LOCKED, requested_bars=240,
-                      authorization=None):
-    """Everything a live route needs, so the ONLY thing left to refuse is the frozen boundary."""
+                      authorization=None, task_enabled=True):
+    """Everything a live route needs; TASK is real but uses test-only execution evidence."""
     config = base.trade_config()
     bars = DemoProvider().bars("SPY", requested_bars)
     adapter = base.FakeAdapter()
@@ -152,7 +197,9 @@ def live_ready_router(*, basis=None, stage=Stage.LIVE_LOCKED, requested_bars=240
         provider=base.TestProvider("a", "fam_a", bars=bars),
         secondary_provider=base.TestProvider("b", "fam_b", bars=bars),
         session_calendar=base.session_calendar(), expected_account_id="ACCT-1",
-        expected_environment="TEST_ENV", requested_bars=requested_bars)
+        expected_environment="TEST_ENV", requested_bars=requested_bars,
+        task_kernel=_task_kernel_fixture() if task_enabled else None,
+        task_context_provider=_task_context_fixture if task_enabled else None)
     return router, adapter
 
 
@@ -485,6 +532,21 @@ def test_amended_core_transmits_a_live_money_order_to_the_test_broker():
         assert entry["state"] == ExecutionState.BROKER_ACKNOWLEDGED.value
         assert entry["broker_order_id"] == "BO-1"
         assert len(adapter.submitted) == 1
+
+
+def test_live_enabled_frozen_cycle_refuses_if_task_is_missing():
+    """A valid amendment is insufficient: LIVE_ENABLED must not bypass TASK."""
+    with base.isolated_store():
+        now = base.in_session_now()
+        router, adapter = live_ready_router(
+            basis=verified_basis(), stage=Stage.LIVE_ENABLED,
+            authorization=owner_authorization(), task_enabled=False)
+        runtime = frozen_cycle_runtime(signal_bar_ts=(now - timedelta(hours=2)).isoformat())
+        report = route_frozen_cycle(router, runtime=runtime, prices={"SPY": 100.0},
+                                    **route_kwargs(now))
+        assert report["transmitted"] == 0 and report["refused"] == 1
+        assert report["results"][0]["outcome"] == "TASK_BLOCKED"
+        assert adapter.submitted == []
 
 
 def test_frozen_cycle_routes_a_live_money_order_once_the_amendment_is_verified():
