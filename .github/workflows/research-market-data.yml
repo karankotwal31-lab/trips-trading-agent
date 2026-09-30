@@ -38,6 +38,18 @@ jobs:
             --output /tmp/trips-evidence/latest_backtest_report.json \
             --trial-log /tmp/trips-evidence/trial_log.jsonl
           cat /tmp/trips-evidence/latest_backtest_report.json
+      - name: Initialize or advance no-order forward shadow evidence
+        run: |
+          mkdir -p /tmp/trips-evidence/shadow
+          python research/shadow/runner.py \
+            --data-dir /tmp/trips-evidence/daily \
+            --journal /tmp/trips-evidence/shadow/journal.jsonl \
+            --heartbeat /tmp/trips-evidence/shadow/heartbeat.json
+          python research/shadow/shadow_report.py \
+            --data-dir /tmp/trips-evidence/daily \
+            --journal /tmp/trips-evidence/shadow/journal.jsonl \
+            --output /tmp/trips-evidence/shadow/forward_report.json
+          cat /tmp/trips-evidence/shadow/forward_report.json
       - name: Summarize honest verdict
         run: |
           python - <<'PY'
