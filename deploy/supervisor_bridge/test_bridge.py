@@ -131,6 +131,17 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(bridge.BridgeError):
             bridge._validate_local_shape(bad, PACKET_HASH)
 
+    def test_hosted_model_cannot_self_grant_user_approval(self):
+        challenger = safe_counsel(packet(), api_key="test-api-key", model="test-model")
+        challenger["recommendation"] = "PROPOSE_QUARANTINED_CHALLENGER"
+        challenger["user_approval_status"] = "GRANTED"
+        with self.assertRaises(bridge.BridgeError):
+            bridge._validate_local_shape(challenger, PACKET_HASH)
+
+        challenger["user_approval_status"] = "REQUIRED"
+        validated = bridge._validate_local_shape(challenger, PACKET_HASH)
+        self.assertEqual(validated["user_approval_status"], "REQUIRED")
+
     def test_run_once_stops_on_first_invalid_response_and_never_orders(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
