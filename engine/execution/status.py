@@ -251,10 +251,12 @@ def build_status() -> dict:
         },
         "safety_suite_integrity": _suite_integrity(),
         "note": (
-            "Trip's is a LIVE-MONEY-ONLY execution system. The stage order is RESEARCH -> BACKTEST "
-            "-> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED; there is no paper stage, "
-            "no paper endpoint and no paper credential anywhere on the route, and there is no "
-            "runtime fallback between environments. Recorded transcripts, mocks and simulations "
+            "Current enforced state: mode=paper; live transmission locked "
+            "(LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in force. "
+            "The execution layer is designed live-money-only with no simulated-broker stage; "
+            "forward evidence comes from no-order shadow runs on real data. Strategy verdict: "
+            "UNPROVEN. The stage order is RESEARCH -> BACKTEST -> SHADOW -> LIVE_LOCKED -> "
+            "LIVE_READY_LOCKED -> LIVE_ENABLED. Recorded transcripts, mocks and simulations "
             "are engineering tests, not trading environments: they create no portfolio state and "
             "prove implementation behaviour only (RECORDED_CONTRACT_CONFORMANCE). Evidence about "
             "the real account comes from LIVE_READ_ONLY_BROKER_VERIFICATION, which submits no "
