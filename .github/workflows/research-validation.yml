@@ -3,6 +3,9 @@ name: Research Validation
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "research/**"
+      - ".github/workflows/research-validation.yml"
   workflow_dispatch:
 
 permissions:
