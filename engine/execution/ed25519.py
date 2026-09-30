@@ -15,7 +15,8 @@ Scope, stated honestly:
   never be used for secret-key operations inside the trading process. Verification operates on
   public data only, so timing leakage there is not a confidentiality risk.
 
-The published RFC 8032 empty-message vector is asserted by ``tests/test_ed25519.py``.
+Published RFC 8032 verification vectors, tamper cases and non-canonical-S rejection are asserted
+by ``research/tests/test_ed25519_vectors.py``.
 """
 
 from __future__ import annotations
