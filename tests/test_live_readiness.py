@@ -70,6 +70,15 @@ def test_ed25519_matches_the_published_rfc8032_vector_two():
     assert ed25519.sign(b"\x72", private).hex().startswith(RFC8032_V2_SIGNATURE_PREFIX)
 
 
+def test_ed25519_docstring_references_the_existing_vector_suite():
+    module_path = ROOT / "engine" / "execution" / "ed25519.py"
+    vector_path = ROOT / "research" / "tests" / "test_ed25519_vectors.py"
+    source = module_path.read_text()
+    assert vector_path.exists()
+    assert "research/tests/test_ed25519_vectors.py" in source
+    assert "tests/test_ed25519.py" not in source
+
+
 def test_ed25519_rejects_tampering_and_malformed_input():
     private, public = ed25519.generate_keypair(RFC8032_V1_SEED)
     signature = ed25519.sign(b"message", private)
