@@ -89,7 +89,7 @@ COUNSEL_SCHEMA = {
         "direct_order_instruction": {"type": "boolean"},
         "user_approval_status": {
             "type": "string",
-            "enum": ["NOT_APPLICABLE", "REQUIRED", "GRANTED"],
+            "enum": ["NOT_APPLICABLE", "REQUIRED"],
         },
     },
     "required": [
@@ -164,6 +164,13 @@ def _validate_local_shape(counsel: Mapping[str, Any], packet_hash: str) -> dict[
         raise BridgeError("hosted sidecar has no market-data tool; current-market claims are refused")
     if counsel.get("external_evidence") not in ([], ()):
         raise BridgeError("external_evidence must be empty when no external evidence tool was supplied")
+    recommendation = counsel.get("recommendation")
+    approval = counsel.get("user_approval_status")
+    if recommendation == "PROPOSE_QUARANTINED_CHALLENGER":
+        if approval != "REQUIRED":
+            raise BridgeError("hosted supervisor cannot grant user approval; challenger approval must remain REQUIRED")
+    elif approval != "NOT_APPLICABLE":
+        raise BridgeError("user_approval_status must be NOT_APPLICABLE for non-challenger counsel")
     refs = counsel.get("packet_hashes")
     if refs != [packet_hash]:
         raise BridgeError("counsel must bind exactly to the current packet hash")
@@ -221,7 +228,9 @@ def call_openai(packet: Mapping[str, Any], *, api_key: str, model: str, timeout:
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read(2 * 1024 * 1024)
+            raw = response.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                raise BridgeError("hosted supervisor response exceeded 2 MiB safety ceiling")
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
         raise BridgeError(f"hosted supervisor unavailable: {type(exc).__name__}") from exc
     try:
@@ -271,7 +280,12 @@ def process_packet(
             raise BridgeError("persisted counsel envelope is invalid")
         counsel = dict(counsel)
     else:
-        counsel = model_call(packet, api_key=api_key, model=model)
+        try:
+            counsel = model_call(packet, api_key=api_key, model=model)
+        except BridgeError:
+            raise
+        except Exception as exc:
+            raise BridgeError(f"hosted supervisor call failed: {type(exc).__name__}") from exc
         counsel = _validate_local_shape(counsel, packet_hash)
         validation = validate_counsel(counsel, known_packet_hashes={packet_hash})
         envelope = {
