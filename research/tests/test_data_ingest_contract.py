@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-INGEST = ROOT / "research" / "data_ingest" / "yfinance_daily.py"
+INGEST = ROOT / "research" / "data_ingest" / "yahoo_chart_daily.py"
 
 
 def test_ingestion_stays_outside_engine_and_broker_paths():
@@ -26,19 +26,21 @@ def test_ingestion_stays_outside_engine_and_broker_paths():
 
 def test_adjusted_close_is_mandatory_and_never_substituted():
     source = INGEST.read_text(encoding="utf-8")
-    assert '"Adj Close"' in source
+    assert '"adjclose"' in source
     assert '"adj_close"' in source
-    assert "auto_adjust=False" in source
-    assert "back_adjust=False" in source
+    assert "includeAdjustedClose" in source
     assert "Close will never be substituted" in source
 
 
 def test_network_fetch_is_confined_to_research_ingestion():
     source = INGEST.read_text(encoding="utf-8")
-    assert "import yfinance as yf" in source
-    assert "yf.download(" in source
+    assert "urllib.request" in source
+    assert "/v8/finance/chart/" in source
+    assert "query1.finance.yahoo.com" in source
+    assert "query2.finance.yahoo.com" in source
     shadow = (ROOT / "research" / "shadow" / "runner.py").read_text(encoding="utf-8")
-    assert "yfinance" not in shadow.lower()
+    assert "finance.yahoo.com" not in shadow.lower()
+    assert "urllib.request" not in shadow
 
 
 def test_workflow_never_commits_market_data():
