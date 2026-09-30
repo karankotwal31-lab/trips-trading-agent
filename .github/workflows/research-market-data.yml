@@ -1,10 +1,21 @@
 name: Research Historical Market Data
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "research/data_ingest/**"
+      - "research/trend/**"
+      - "research/shadow/**"
+      - ".github/workflows/research-market-data.yml"
+      - ".github/workflows/research-validation.yml"
+      - "research/tools/check_scope.py"
   pull_request:
     branches: [main]
     paths:
       - "research/data_ingest/**"
+      - "research/trend/**"
+      - "research/shadow/**"
       - ".github/workflows/research-market-data.yml"
       - ".github/workflows/research-validation.yml"
       - "research/tools/check_scope.py"
@@ -15,6 +26,10 @@ on:
 permissions:
   contents: read
   actions: read
+
+concurrency:
+  group: trips-research-market-data-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   historical-evidence:
