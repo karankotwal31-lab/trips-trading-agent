@@ -44,6 +44,7 @@ CONFORMANCE_RECORD_VERSION = 1
 ENGINEERING_CHECKS: Tuple[str, ...] = (
     "frozen_core_digest_verified",
     "executable_build_integrity",
+    "strategy_evidence_pass",
     "owner_trust_root_exercised",
     "broker_channel_implementation_exercised",
     "broker_specific_normalization_exercised",
@@ -110,6 +111,20 @@ def _record(name: str, *, passed: bool, detail: str, produced_by: str, observati
             now: datetime) -> EngineeringEvidence:
     return EngineeringEvidence(name=name, passed=bool(passed), detail=detail, produced_by=produced_by,
                               observation=dict(observation), recorded_at=now.isoformat())
+
+
+def _check_strategy_evidence(now: datetime) -> EngineeringEvidence:
+    from .strategy_evidence import strategy_evidence_status
+
+    status = strategy_evidence_status(now=now)
+    return _record(
+        "strategy_evidence_pass",
+        passed=bool(status["passed"]),
+        detail=("backtest + forward evidence verified"
+                if status["passed"] else "; ".join(status["reasons"][:4])),
+        produced_by="execution.strategy_evidence.strategy_evidence_status",
+        observation=status,
+        now=now)
 
 
 # ---------------------------------------------------------------------------
@@ -839,6 +854,7 @@ def _check_supervisor_bridge(now: datetime) -> EngineeringEvidence:
 _CHECKS: Tuple[Tuple[str, Callable[..., EngineeringEvidence], bool], ...] = (
     ("frozen_core_digest_verified", _check_frozen_core_digest, False),
     ("executable_build_integrity", _check_build_integrity, False),
+    ("strategy_evidence_pass", _check_strategy_evidence, False),
     ("owner_trust_root_exercised", _check_owner_trust_root, False),
     ("broker_channel_implementation_exercised", _check_broker_channels, False),
     ("broker_specific_normalization_exercised", _check_normalization, False),

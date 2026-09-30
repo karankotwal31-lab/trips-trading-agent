@@ -486,10 +486,10 @@ def test_readiness_is_computed_from_executed_evidence_not_module_imports():
                  "execution_authority_gate_present", "session_calendar_available"):
         assert gone not in checks, f"{gone} is a module-presence check, not evidence"
     assert "importlib" not in _lifecycle_source()
-    assert readiness["failing_engineering"] == []
-    assert readiness["engineering_ready"] is True
+    assert "strategy_evidence_pass" in readiness["failing_engineering"]
+    assert readiness["engineering_ready"] is False
     assert readiness["ceiling"] == "LIVE_READY_LOCKED"
-    assert readiness["live_status"] == "ENGINEERING_COMPLETE_STILL_LOCKED"
+    assert readiness["live_status"] == "NOT_COMPLETE"
 
 
 def _lifecycle_source() -> str:
@@ -520,13 +520,15 @@ def test_the_two_mixed_blockers_are_split_into_engineering_and_owner_parts():
     assert "OAuth" in upstox and "BrokerChannel" not in upstox
 
 
-def test_live_ready_locked_is_reachable_but_grants_nothing():
+def test_live_ready_locked_refuses_while_strategy_evidence_is_missing():
     lifecycle = Lifecycle(Stage.LIVE_LOCKED)
     outcome = lifecycle.advance(Stage.LIVE_READY_LOCKED, actor=Actor.TESTS)
-    assert outcome["advanced"] is True and outcome["code"] == "STAGE_ADVANCED"
-    assert lifecycle.stage is Stage.LIVE_READY_LOCKED
+    assert outcome["advanced"] is False
+    assert outcome["code"] == "LIVE_READY_REFUSED_ENGINEERING_INCOMPLETE"
+    assert "strategy_evidence_pass" in outcome["reason"]
+    assert lifecycle.stage is Stage.LIVE_LOCKED
     verdict = lifecycle.may_transmit_live()
-    assert verdict["permitted"] is False, "the readiness stage must never release capital"
+    assert verdict["permitted"] is False
     assert verdict["code"] == "LIVE_LOCKED_REFUSAL"
 
 
@@ -567,13 +569,13 @@ def test_there_is_no_paper_stage_and_the_order_is_exactly_as_mandated():
 
     assert ALLOWED_TRANSITIONS[Stage.SHADOW] == (Stage.LIVE_LOCKED,)
     assert Stage.LIVE_LOCKED in ALLOWED_TRANSITIONS[Stage.SHADOW]
-    # And LIVE_ENABLED still requires all eleven named things, none of them a paper prerequisite.
-    assert len(LIVE_ENABLED_REQUIREMENTS) == 11
+    # Strategy evidence is explicit; none of the twelve requirements is a paper prerequisite.
+    assert len(LIVE_ENABLED_REQUIREMENTS) == 12
     for requirement in LIVE_ENABLED_REQUIREMENTS:
         assert "paper" not in requirement and "sandbox" not in requirement
 
 
-def test_live_enabled_requires_exactly_the_mandated_eleven_requirements():
+def test_live_enabled_requires_exactly_the_mandated_twelve_requirements():
     from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS
 
     assert set(LIVE_ENABLED_REQUIREMENTS) == {
@@ -581,6 +583,7 @@ def test_live_enabled_requires_exactly_the_mandated_eleven_requirements():
         "owner_signed_capital_governor_profile",
         "approved_constitutional_amendment_covering_all_three_frozen_blockers",
         "exact_approved_build_and_config_identities",
+        "strategy_evidence_pass",
         "owner_signed_live_authorization",
         "verified_real_live_broker_account",
         "verified_live_market_data",

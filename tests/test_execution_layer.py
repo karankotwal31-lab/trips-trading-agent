@@ -748,10 +748,11 @@ def test_preflight_rejects_unapproved_configuration():
         pass
 
 
-def test_preflight_reports_exactly_the_twenty_preconditions_in_spec_order():
+def test_preflight_reports_exactly_the_twenty_one_preconditions_in_spec_order():
     report = make_evaluator().evaluate(intent=intent(), portfolio=portfolio(), price=100.0)
     assert [c["name"] for c in report.checks] == list(PRECONDITIONS)
-    assert len(report.checks) == 20
+    assert len(report.checks) == 21
+    assert "strategy_evidence_pass" in PRECONDITIONS
 
 
 def test_real_chain_truth_vetoes_demo_data():
