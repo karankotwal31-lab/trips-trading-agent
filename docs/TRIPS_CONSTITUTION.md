@@ -14,7 +14,7 @@ These rules are non-negotiable. Strategy, Guardian, Evolution, supervisor advice
 10. **SEPARATE_ANALYSIS_FROM_EXECUTION** — AI interprets and challenges; deterministic gates own execution authority.
 11. **NO_SILENT_MODEL_DRIFT** — Strategy/risk changes require versioning, tests, review and a recorded configuration fingerprint.
 12. **ESCALATE_UNKNOWN_UNKNOWNS** — Novel/conflicting conditions are escalated instead of guessed.
-13. **PAPER_FIRST** — This build cannot submit live-money orders.
+13. **PAPER_FIRST** — Current enforced mode remains paper; this build cannot submit live-money orders while this rule is in force. The additive execution route may be live-money-only in design, but design does not grant authority.
 14. **CLOSED_BARS_ONLY** — Signals may use only fully closed bars; incomplete candles cannot authorize entries.
 15. **CAUSAL_EXECUTION** — A signal formed at a bar close cannot be filled retroactively at that same close.
 16. **STATE_INTEGRITY** — Corrupt or inconsistent critical state fails closed; it is never silently reset.
