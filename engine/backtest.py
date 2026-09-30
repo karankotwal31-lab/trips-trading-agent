@@ -21,6 +21,23 @@ def max_drawdown(curve):
     return mdd
 
 
+def _update_protective_stop(position, bar):
+    """Mirror forge_agent management: close-derived stops apply only to later bars."""
+    initial_r = position["entry"] - position["initial_stop"]
+    if initial_r <= 0:
+        return position
+    favorable_r = (bar.close - position["entry"]) / initial_r
+    if favorable_r >= CFG["trade"]["break_even_after_r"]:
+        position["stop"] = max(position["stop"], position["entry"])
+        position["protected"] = True
+    if favorable_r >= CFG["trade"]["trail_after_r"]:
+        position["stop"] = max(
+            position["stop"],
+            bar.close - CFG["trade"]["trail_atr_multiple"] * position["atr_at_entry"])
+        position["trailing"] = True
+    return position
+
+
 def simulate(symbol, bars, cost_bps=5.0, signal_threshold=0.72):
     """Causal bar-close backtest: signal at close i, earliest fill at open i+1."""
     equity = 100000.0
@@ -42,8 +59,11 @@ def simulate(symbol, bars, cost_bps=5.0, signal_threshold=0.72):
                 qty = int((equity * CFG["risk"]["max_risk_per_trade_pct"]) / risk)
                 qty = min(qty, int((equity * CFG["risk"]["max_total_exposure_pct"]) / entry))
                 if qty > 0:
-                    position = {"entry": entry, "stop": stop,
-                                "target": entry + CFG["trade"]["target_r_multiple"] * risk, "qty": qty}
+                    position = {
+                        "entry": entry, "initial_stop": stop, "stop": stop,
+                        "target": entry + CFG["trade"]["target_r_multiple"] * risk, "qty": qty,
+                        "atr_at_entry": pending["atr"], "protected": False, "trailing": False,
+                    }
                     fills.append({"signal_i": pending["signal_i"], "fill_i": i})
             pending = None
 
@@ -69,6 +89,11 @@ def simulate(symbol, bars, cost_bps=5.0, signal_threshold=0.72):
                 equity += pnl
                 trades.append(pnl)
                 position = None
+            else:
+                # Identical causal ordering to forge_agent: this bar first tests the OLD stop and
+                # target; a break-even/trailing adjustment derived from this close affects only
+                # subsequent bars.
+                _update_protective_stop(position, bar)
 
         # Create a signal only after this bar has closed. It cannot fill on this bar.
         if position is None and pending is None:
