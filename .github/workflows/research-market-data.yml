@@ -39,6 +39,15 @@ jobs:
             --output /tmp/trips-evidence/latest_backtest_report.json \
             --trial-log /tmp/trips-evidence/trial_log.jsonl
           cat /tmp/trips-evidence/latest_backtest_report.json
+      - name: Check durable Neon credential availability (presence only)
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          if [ -n "${NEON_DATABASE_URL}" ]; then
+            echo "NEON_DATABASE_URL_PRESENT=true"
+          else
+            echo "NEON_DATABASE_URL_PRESENT=false"
+          fi
       - name: Restore previous same-branch shadow checkpoint when available
         env:
           GH_TOKEN: ${{ github.token }}
