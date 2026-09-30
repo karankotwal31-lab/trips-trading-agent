@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "P003",
+  "title": "correlated-exposure-cap",
+  "patch": "patch.diff",
+  "test_commands": [
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_engine as t; t.test_correlated_exposure_caps_combined_position_size(); t.test_correlated_exposure_gate_blocks_when_bucket_is_full(); t.test_config_guard_rejects_non_tightening_correlated_limit()"
+    ]
+  ]
+}

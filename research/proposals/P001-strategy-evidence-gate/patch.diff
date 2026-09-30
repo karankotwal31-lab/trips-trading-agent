@@ -1,0 +1,573 @@
+diff --git a/engine/execution/strategy_evidence.py b/engine/execution/strategy_evidence.py
+new file mode 100644
+--- /dev/null
++++ b/engine/execution/strategy_evidence.py
+@@ -0,0 +1,141 @@
++"""Fail-closed bridge from approved research evidence into execution readiness.
++
++This module deliberately does not import research code. It independently verifies the exact
++artifacts produced by the preregistered Trend Harness / forward-shadow path. Missing, stale,
++malformed or hash-drifted evidence is a refusal, never an implicit pass.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Any, Dict, Mapping, Optional
++
++ROOT = Path(__file__).resolve().parents[2]
++MAX_EVIDENCE_AGE_DAYS = 30
++
++
++def _sha256(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as handle:
++        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def _aware(value: Any, label: str) -> datetime:
++    if not isinstance(value, str) or not value.strip():
++        raise ValueError(f"{label} generated_at missing")
++    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    if parsed.tzinfo is None:
++        raise ValueError(f"{label} generated_at must be timezone-aware")
++    return parsed.astimezone(timezone.utc)
++
++
++def _read_report(path: Path, label: str) -> Mapping[str, Any]:
++    if not path.exists():
++        raise ValueError(f"{label} report missing: {path}")
++    try:
++        report = json.loads(path.read_text(encoding="utf-8"))
++    except Exception as exc:
++        raise ValueError(f"{label} report is unreadable JSON") from exc
++    if not isinstance(report, Mapping):
++        raise ValueError(f"{label} report must be a JSON object")
++    return report
++
++
++def _expected_hashes(root: Path) -> Dict[str, str]:
++    trend = root / "research" / "trend"
++    manifest = root / "research" / "data" / "daily" / "manifest.sha256"
++    required = {
++        "strategy_spec": trend / "strategy_spec.json",
++        "universe": trend / "universe.json",
++        "cost_model": trend / "cost_model.json",
++        "pass_criteria": trend / "pass_criteria.json",
++        "data_manifest": manifest,
++    }
++    missing = [name for name, path in required.items() if not path.exists()]
++    if missing:
++        raise ValueError("strategy evidence inputs missing: " + ", ".join(missing))
++    return {name: _sha256(path) for name, path in required.items()}
++
++
++def strategy_evidence_status(
++    *,
++    root: Optional[Path] = None,
++    now: Optional[datetime] = None,
++    max_age_days: int = MAX_EVIDENCE_AGE_DAYS,
++) -> Dict[str, Any]:
++    """Return a deterministic evidence verdict. Only passed=True can satisfy readiness."""
++    root = Path(root or ROOT)
++    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
++    reasons = []
++    backtest_path = root / "research" / "results" / "latest_backtest_report.json"
++    forward_path = root / "research" / "shadow" / "forward_report.json"
++
++    try:
++        expected = _expected_hashes(root)
++    except Exception as exc:
++        return {
++            "passed": False,
++            "reasons": [str(exc)],
++            "max_age_days": int(max_age_days),
++            "backtest_report": str(backtest_path),
++            "forward_report": str(forward_path),
++        }
++
++    try:
++        backtest = _read_report(backtest_path, "backtest")
++        forward = _read_report(forward_path, "forward")
++    except Exception as exc:
++        return {
++            "passed": False,
++            "reasons": [str(exc)],
++            "expected_hashes": expected,
++            "max_age_days": int(max_age_days),
++            "backtest_report": str(backtest_path),
++            "forward_report": str(forward_path),
++        }
++
++    if backtest.get("verdict") != "EVIDENCE_PASS":
++        reasons.append(f"backtest verdict is {backtest.get('verdict')!r}, not EVIDENCE_PASS")
++    if forward.get("verdict") != "FORWARD_PASS":
++        reasons.append(f"forward verdict is {forward.get('verdict')!r}, not FORWARD_PASS")
++    if forward.get("weight_parity") is not True:
++        reasons.append("forward weight_parity is not true")
++
++    for label, report in (("backtest", backtest), ("forward", forward)):
++        hashes = report.get("hashes")
++        if not isinstance(hashes, Mapping):
++            reasons.append(f"{label} hashes missing")
++        else:
++            for name, expected_digest in expected.items():
++                if hashes.get(name) != expected_digest:
++                    reasons.append(
++                        f"{label} hash mismatch for {name}: "
++                        f"recorded={hashes.get(name)!r} expected={expected_digest!r}"
++                    )
++        try:
++            generated = _aware(report.get("generated_at"), label)
++        except Exception as exc:
++            reasons.append(str(exc))
++            continue
++        age_seconds = (now - generated).total_seconds()
++        if age_seconds < 0:
++            reasons.append(f"{label} report generated_at is in the future")
++        elif age_seconds > int(max_age_days) * 86400:
++            reasons.append(f"{label} report is older than {max_age_days} days")
++
++    return {
++        "passed": not reasons,
++        "reasons": reasons,
++        "expected_hashes": expected,
++        "backtest_verdict": backtest.get("verdict"),
++        "forward_verdict": forward.get("verdict"),
++        "weight_parity": forward.get("weight_parity"),
++        "max_age_days": int(max_age_days),
++        "backtest_report": str(backtest_path),
++        "forward_report": str(forward_path),
++    }
+diff --git a/engine/execution/readiness.py b/engine/execution/readiness.py
+--- a/engine/execution/readiness.py
++++ b/engine/execution/readiness.py
+@@ -45,5 +45,6 @@ ENGINEERING_CHECKS: Tuple[str, ...] = (
+     "frozen_core_digest_verified",
+     "executable_build_integrity",
++    "strategy_evidence_pass",
+     "owner_trust_root_exercised",
+     "broker_channel_implementation_exercised",
+     "broker_specific_normalization_exercised",
+@@ -113,5 +113,19 @@
+ 
+ 
++def _check_strategy_evidence(now: datetime) -> EngineeringEvidence:
++    from .strategy_evidence import strategy_evidence_status
++
++    status = strategy_evidence_status(now=now)
++    return _record(
++        "strategy_evidence_pass",
++        passed=bool(status["passed"]),
++        detail=("backtest + forward evidence verified"
++                if status["passed"] else "; ".join(status["reasons"][:4])),
++        produced_by="execution.strategy_evidence.strategy_evidence_status",
++        observation=status,
++        now=now)
++
++
+ # ---------------------------------------------------------------------------
+ # The channels the conformance evidence is produced from
+ # ---------------------------------------------------------------------------
+@@ -839,5 +852,6 @@ _CHECKS: Tuple[Tuple[str, Callable[..., EngineeringEvidence], bool], ...] = (
+     ("frozen_core_digest_verified", _check_frozen_core_digest, False),
+     ("executable_build_integrity", _check_build_integrity, False),
++    ("strategy_evidence_pass", _check_strategy_evidence, False),
+     ("owner_trust_root_exercised", _check_owner_trust_root, False),
+     ("broker_channel_implementation_exercised", _check_broker_channels, False),
+     ("broker_specific_normalization_exercised", _check_normalization, False),
+diff --git a/engine/execution/lifecycle.py b/engine/execution/lifecycle.py
+--- a/engine/execution/lifecycle.py
++++ b/engine/execution/lifecycle.py
+@@ -86,6 +86,7 @@ LIVE_ENABLED_REQUIREMENTS: Tuple[str, ...] = (
+     "owner_signed_capital_governor_profile",
+     "approved_constitutional_amendment_covering_all_three_frozen_blockers",
+     "exact_approved_build_and_config_identities",
++    "strategy_evidence_pass",
+     "owner_signed_live_authorization",
+     "verified_real_live_broker_account",
+     "verified_live_market_data",
+@@ -641,21 +642,24 @@ class Lifecycle:
+             return {"advanced": False, "code": "PROMOTION_REFUSED_ILLEGAL_TRANSITION",
+                     "stage": self._stage.value,
+                     "reason": f"{self._stage.value} -> {to.value} is not a permitted transition"}
+-        if actor is not Actor.OWNER:
+-            if to is not Stage.LIVE_READY_LOCKED:
+-                return {"advanced": False, "code": "PROMOTION_REFUSED_NOT_OWNER",
+-                        "stage": self._stage.value,
+-                        "reason": f"{actor.value} is not a promotion authority"}
++
++        if to is Stage.LIVE_READY_LOCKED:
+             readiness = self.live_readiness()
+             if not readiness["engineering_ready"]:
+                 return {"advanced": False, "code": "LIVE_READY_REFUSED_ENGINEERING_INCOMPLETE",
+                         "stage": self._stage.value,
+                         "reason": "; ".join(readiness["failing_engineering"]),
+                         "readiness": readiness}
+-            self._stage = to
+-            return {"advanced": True, "code": "STAGE_ADVANCED", "stage": self._stage.value,
+-                    "note": "still locked: no capital release is possible from this stage",
+-                    "readiness": readiness}
++            if actor is not Actor.OWNER:
++                self._stage = to
++                return {"advanced": True, "code": "STAGE_ADVANCED", "stage": self._stage.value,
++                        "note": "still locked: no capital release is possible from this stage",
++                        "readiness": readiness}
++
++        if actor is not Actor.OWNER:
++            return {"advanced": False, "code": "PROMOTION_REFUSED_NOT_OWNER",
++                    "stage": self._stage.value,
++                    "reason": f"{actor.value} is not a promotion authority"}
+ 
+         if to is Stage.LIVE_ENABLED:
+             effective_authorization = authorization or self._authorization
+diff --git a/engine/execution/preflight.py b/engine/execution/preflight.py
+--- a/engine/execution/preflight.py
++++ b/engine/execution/preflight.py
+@@ -31,10 +31,13 @@ from .identity import authorization_drift, current_identity
+ from .live_path import LivePathViolation, assert_no_forbidden_trading_environment
+ from .registry import AdapterRegistry
+ from .session import SessionCalendar, SessionStatus
++from .strategy_evidence import strategy_evidence_status
+ 
+-#: The 20 deterministic preconditions. Order is the spec's order.
++
++#: The deterministic preconditions. Order is the spec's order.
+ PRECONDITIONS: Tuple[str, ...] = (
+     "approved_strategy_build_identity",
++    "strategy_evidence_pass",
+     "approved_configuration_identity",
+     "approved_risk_profile",
+     "approved_capital_governor_profile",
+@@ -301,6 +303,12 @@ class PreflightEvaluator:
+                 f"executable build integrity failed: {type(exc).__name__}")
+             artifacts["build_hash"] = None
+ 
++        strategy_evidence = strategy_evidence_status(now=now)
++        add("strategy_evidence_pass", bool(strategy_evidence["passed"]),
++            "verified" if strategy_evidence["passed"]
++            else "; ".join(strategy_evidence["reasons"][:4]))
++        artifacts["strategy_evidence"] = strategy_evidence
++
+         config_ok = fingerprint_config(cfg) == self.approved_config_hash
+         add("approved_configuration_identity", config_ok,
+             f"config fingerprint {'matches' if config_ok else 'differs from'} the approved fingerprint")
+@@ -584,6 +591,7 @@ class PreflightEvaluator:
+             "intent_current": bool(intent_current),
+         }
+         capital_release_map = {
++            "strategy_evidence_pass": bool(strategy_evidence["passed"]),
+             "governor_permits": bool(governor_decision.allowed),
+             "broker_state_reconciled": bool(recon_clean),
+             "broker_healthy": broker_error is None and bool(getattr(health, "healthy", False)),
+@@ -601,7 +609,7 @@ class PreflightEvaluator:
+         self._refine(checks, "loss_drawdown_limits_not_breached",
+                      f"governor daily/drawdown limits within bounds={loss_limits_ok}")
+ 
+-        # Exactly the 20 spec preconditions, reported in spec order. Drift is a defect.
++        # Exactly the declared preconditions, reported in spec order. Drift is a defect.
+         order = {name: index for index, name in enumerate(PRECONDITIONS)}
+         present = {c["name"] for c in checks}
+         missing = [name for name in PRECONDITIONS if name not in present]
+diff --git a/engine/execution/status.py b/engine/execution/status.py
+--- a/engine/execution/status.py
++++ b/engine/execution/status.py
+@@ -52,5 +52,6 @@ from execution import (
+     verify_frozen_core_digest,
+ )
++from execution.strategy_evidence import strategy_evidence_status  # noqa: E402
+ 
+ 
+ def _approved_config() -> dict:
+@@ -187,6 +188,7 @@ def build_status() -> dict:
+         "constitution_contains_live_gate": "LIVE_GATE" in rule_ids,
+         "frozen_config_mode": frozen_config_mode(),
+         "lifecycle_stage": lifecycle.stage.value,
++        "strategy_evidence": strategy_evidence_status(),
+         "live_readiness": live_readiness_report(),
+         "live_readiness_by_lifecycle": lifecycle.live_readiness(),
+         "live_transmission": lifecycle.may_transmit_live(),
+diff --git a/tests/test_live_readiness.py b/tests/test_live_readiness.py
+--- a/tests/test_live_readiness.py
++++ b/tests/test_live_readiness.py
+@@ -472,121 +472,124 @@
+ 
+-def test_readiness_is_computed_from_executed_evidence_not_module_imports():
+-    """Every engineering check must EXECUTE something and carry a digest over the observation."""
+-    from execution.readiness import ENGINEERING_CHECKS
+-
+-    readiness = Lifecycle(Stage.LIVE_LOCKED).live_readiness()
+-    checks = {check["name"]: check for check in readiness["engineering_checks"]}
+-    assert set(ENGINEERING_CHECKS) <= set(checks)
+-    for name, check in checks.items():
+-        assert check["produced_by"], f"{name} names no producing system"
+-        assert len(check["observation_hash"]) == 64, f"{name} carries no evidence digest"
+-    # The old module-import checks are gone, and nothing like them replaced them.
+-    for gone in ("broker_adapters_present", "reconciliation_engine_present",
+-                 "supervisor_provider_present", "owner_trust_root_present",
+-                 "execution_authority_gate_present", "session_calendar_available"):
+-        assert gone not in checks, f"{gone} is a module-presence check, not evidence"
+-    assert "importlib" not in _lifecycle_source()
+-    assert readiness["failing_engineering"] == []
+-    assert readiness["engineering_ready"] is True
+-    assert readiness["ceiling"] == "LIVE_READY_LOCKED"
+-    assert readiness["live_status"] == "ENGINEERING_COMPLETE_STILL_LOCKED"
+-
+-
+-def _lifecycle_source() -> str:
+-    return (Path(__file__).resolve().parents[1] / "engine" / "execution" / "lifecycle.py").read_text()
+-
+-
+-def test_the_two_mixed_blockers_are_split_into_engineering_and_owner_parts():
+-    """Not all six remaining blockers are owner-only, and the split is explicit."""
+-    items = {item.name: item for item in OWNER_BLOCKING_ITEMS}
+-    assert set(items) == {"owner_public_key_configured", "capital_governor_profile_set",
+-                          "broker_channel_and_conformance", "production_market_data",
+-                          "owner_signed_live_authorization",
+-                          "constitutional_amendment_applied"}
+-    mixed = {"broker_channel_and_conformance", "production_market_data"}
+-    owner_only = {"owner_public_key_configured", "capital_governor_profile_set",
+-                  "owner_signed_live_authorization", "constitutional_amendment_applied"}
+-    for name, item in items.items():
+-        assert item.owner_only is (name in owner_only), name
+-        assert item.owner, name
+-        if name in mixed:
+-            assert item.engineering, f"{name} must still state its engineering part"
+-    assert items["broker_channel_and_conformance"].engineering[0].startswith("a real BrokerChannel")
+-    assert any("provider API key" in part
+-               for part in items["production_market_data"].owner)
+-    # Upstox's mandate evidence names an Indian cash segment: that is engineering-side evidence,
+-    # not a credential, so the owner part stays exactly the account/OAuth act.
+-    upstox = items["broker_channel_and_conformance"].owner[0]
+-    assert "OAuth" in upstox and "BrokerChannel" not in upstox
+-
+-
+-def test_live_ready_locked_is_reachable_but_grants_nothing():
+-    lifecycle = Lifecycle(Stage.LIVE_LOCKED)
+-    outcome = lifecycle.advance(Stage.LIVE_READY_LOCKED, actor=Actor.TESTS)
+-    assert outcome["advanced"] is True and outcome["code"] == "STAGE_ADVANCED"
+-    assert lifecycle.stage is Stage.LIVE_READY_LOCKED
+-    verdict = lifecycle.may_transmit_live()
+-    assert verdict["permitted"] is False, "the readiness stage must never release capital"
+-    assert verdict["code"] == "LIVE_LOCKED_REFUSAL"
+-
+-
+-def test_live_enabled_stays_owner_only_even_from_the_readiness_stage():
+-    lifecycle = Lifecycle(Stage.LIVE_READY_LOCKED)
+-    for actor in (Actor.TESTS, Actor.SUPERVISOR, Actor.BROKER, Actor.STUDENT, Actor.EVOLUTION):
+-        outcome = lifecycle.advance(Stage.LIVE_ENABLED, actor=actor)
+-        assert outcome["advanced"] is False
+-        assert outcome["code"] == "PROMOTION_REFUSED_NOT_OWNER"
+-    assert lifecycle.stage is Stage.LIVE_READY_LOCKED
+-
+-
+-def test_the_ceiling_is_not_self_promoting():
+-    """LIVE_READY_LOCKED must not be reachable from a stage that has not earned it."""
+-    assert Stage.RESEARCH not in [Stage.LIVE_READY_LOCKED]
+-    for start in (Stage.RESEARCH, Stage.BACKTEST, Stage.SHADOW):
+-        outcome = Lifecycle(start).advance(Stage.LIVE_READY_LOCKED, actor=Actor.OWNER)
+-        assert outcome["advanced"] is False
+-        assert outcome["code"] == "PROMOTION_REFUSED_ILLEGAL_TRANSITION"
+-
+-
+-# ---------------------------------------------------------------------------
+-# LIVE-MONEY-ONLY: no paper stage, one canonical path, read-only verification
+-# ---------------------------------------------------------------------------
+-
+-
+-def test_there_is_no_paper_stage_and_the_order_is_exactly_as_mandated():
+-    """The stage order is data, and PAPER is absent by design rather than by omission."""
+-    from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS, STAGE_ORDER
+-
+-    assert [stage.value for stage in STAGE_ORDER] == [
+-        "RESEARCH", "BACKTEST", "SHADOW", "LIVE_LOCKED", "LIVE_READY_LOCKED", "LIVE_ENABLED"]
+-    assert not hasattr(Stage, "PAPER")
+-    assert "PAPER" not in {stage.value for stage in STAGE_ORDER}
+-    assert all(Stage.SHADOW not in () for _ in ())  # no paper waypoint exists to be skipped
+-    # No transition routes through a paper stage, and the two that exist are the whole story.
+-    from execution.lifecycle import ALLOWED_TRANSITIONS
+-
+-    assert ALLOWED_TRANSITIONS[Stage.SHADOW] == (Stage.LIVE_LOCKED,)
+-    assert Stage.LIVE_LOCKED in ALLOWED_TRANSITIONS[Stage.SHADOW]
+-    # And LIVE_ENABLED still requires all eleven named things, none of them a paper prerequisite.
+-    assert len(LIVE_ENABLED_REQUIREMENTS) == 11
+-    for requirement in LIVE_ENABLED_REQUIREMENTS:
+-        assert "paper" not in requirement and "sandbox" not in requirement
+-
+-
+-def test_live_enabled_requires_exactly_the_mandated_eleven_requirements():
+-    from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS
+-
+-    assert set(LIVE_ENABLED_REQUIREMENTS) == {
+-        "pinned_ed25519_owner_trust_root",
+-        "owner_signed_capital_governor_profile",
+-        "approved_constitutional_amendment_covering_all_three_frozen_blockers",
+-        "exact_approved_build_and_config_identities",
+-        "owner_signed_live_authorization",
+-        "verified_real_live_broker_account",
+-        "verified_live_market_data",
+-        "clean_reconciliation",
+-        "healthy_truth_risk_capital_and_constitution_gates",
+-        "no_halt",
+-        "no_unresolved_order_ambiguity",
+-    }
++def test_readiness_is_computed_from_executed_evidence_not_module_imports():
++    """Every engineering check must EXECUTE something and carry a digest over the observation."""
++    from execution.readiness import ENGINEERING_CHECKS
++
++    readiness = Lifecycle(Stage.LIVE_LOCKED).live_readiness()
++    checks = {check["name"]: check for check in readiness["engineering_checks"]}
++    assert set(ENGINEERING_CHECKS) <= set(checks)
++    for name, check in checks.items():
++        assert check["produced_by"], f"{name} names no producing system"
++        assert len(check["observation_hash"]) == 64, f"{name} carries no evidence digest"
++    # The old module-import checks are gone, and nothing like them replaced them.
++    for gone in ("broker_adapters_present", "reconciliation_engine_present",
++                 "supervisor_provider_present", "owner_trust_root_present",
++                 "execution_authority_gate_present", "session_calendar_available"):
++        assert gone not in checks, f"{gone} is a module-presence check, not evidence"
++    assert "importlib" not in _lifecycle_source()
++    assert "strategy_evidence_pass" in readiness["failing_engineering"]
++    assert readiness["engineering_ready"] is False
++    assert readiness["ceiling"] == "LIVE_READY_LOCKED"
++    assert readiness["live_status"] == "NOT_COMPLETE"
++
++
++def _lifecycle_source() -> str:
++    return (Path(__file__).resolve().parents[1] / "engine" / "execution" / "lifecycle.py").read_text()
++
++
++def test_the_two_mixed_blockers_are_split_into_engineering_and_owner_parts():
++    """Not all six remaining blockers are owner-only, and the split is explicit."""
++    items = {item.name: item for item in OWNER_BLOCKING_ITEMS}
++    assert set(items) == {"owner_public_key_configured", "capital_governor_profile_set",
++                          "broker_channel_and_conformance", "production_market_data",
++                          "owner_signed_live_authorization",
++                          "constitutional_amendment_applied"}
++    mixed = {"broker_channel_and_conformance", "production_market_data"}
++    owner_only = {"owner_public_key_configured", "capital_governor_profile_set",
++                  "owner_signed_live_authorization", "constitutional_amendment_applied"}
++    for name, item in items.items():
++        assert item.owner_only is (name in owner_only), name
++        assert item.owner, name
++        if name in mixed:
++            assert item.engineering, f"{name} must still state its engineering part"
++    assert items["broker_channel_and_conformance"].engineering[0].startswith("a real BrokerChannel")
++    assert any("provider API key" in part
++               for part in items["production_market_data"].owner)
++    # Upstox's mandate evidence names an Indian cash segment: that is engineering-side evidence,
++    # not a credential, so the owner part stays exactly the account/OAuth act.
++    upstox = items["broker_channel_and_conformance"].owner[0]
++    assert "OAuth" in upstox and "BrokerChannel" not in upstox
++
++
++def test_live_ready_locked_refuses_while_strategy_evidence_is_missing():
++    lifecycle = Lifecycle(Stage.LIVE_LOCKED)
++    outcome = lifecycle.advance(Stage.LIVE_READY_LOCKED, actor=Actor.TESTS)
++    assert outcome["advanced"] is False
++    assert outcome["code"] == "LIVE_READY_REFUSED_ENGINEERING_INCOMPLETE"
++    assert "strategy_evidence_pass" in outcome["reason"]
++    assert lifecycle.stage is Stage.LIVE_LOCKED
++    verdict = lifecycle.may_transmit_live()
++    assert verdict["permitted"] is False
++    assert verdict["code"] == "LIVE_LOCKED_REFUSAL"
++
++
++def test_live_enabled_stays_owner_only_even_from_the_readiness_stage():
++    lifecycle = Lifecycle(Stage.LIVE_READY_LOCKED)
++    for actor in (Actor.TESTS, Actor.SUPERVISOR, Actor.BROKER, Actor.STUDENT, Actor.EVOLUTION):
++        outcome = lifecycle.advance(Stage.LIVE_ENABLED, actor=actor)
++        assert outcome["advanced"] is False
++        assert outcome["code"] == "PROMOTION_REFUSED_NOT_OWNER"
++    assert lifecycle.stage is Stage.LIVE_READY_LOCKED
++
++
++def test_the_ceiling_is_not_self_promoting():
++    """LIVE_READY_LOCKED must not be reachable from a stage that has not earned it."""
++    assert Stage.RESEARCH not in [Stage.LIVE_READY_LOCKED]
++    for start in (Stage.RESEARCH, Stage.BACKTEST, Stage.SHADOW):
++        outcome = Lifecycle(start).advance(Stage.LIVE_READY_LOCKED, actor=Actor.OWNER)
++        assert outcome["advanced"] is False
++        assert outcome["code"] == "PROMOTION_REFUSED_ILLEGAL_TRANSITION"
++
++
++# ---------------------------------------------------------------------------
++# LIVE-MONEY-ONLY: no paper stage, one canonical path, read-only verification
++# ---------------------------------------------------------------------------
++
++
++def test_there_is_no_paper_stage_and_the_order_is_exactly_as_mandated():
++    """The stage order is data, and PAPER is absent by design rather than by omission."""
++    from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS, STAGE_ORDER
++
++    assert [stage.value for stage in STAGE_ORDER] == [
++        "RESEARCH", "BACKTEST", "SHADOW", "LIVE_LOCKED", "LIVE_READY_LOCKED", "LIVE_ENABLED"]
++    assert not hasattr(Stage, "PAPER")
++    assert "PAPER" not in {stage.value for stage in STAGE_ORDER}
++    assert all(Stage.SHADOW not in () for _ in ())  # no paper waypoint exists to be skipped
++    # No transition routes through a paper stage, and the two that exist are the whole story.
++    from execution.lifecycle import ALLOWED_TRANSITIONS
++
++    assert ALLOWED_TRANSITIONS[Stage.SHADOW] == (Stage.LIVE_LOCKED,)
++    assert Stage.LIVE_LOCKED in ALLOWED_TRANSITIONS[Stage.SHADOW]
++    # Strategy evidence is explicit; none of the twelve requirements is a paper prerequisite.
++    assert len(LIVE_ENABLED_REQUIREMENTS) == 12
++    for requirement in LIVE_ENABLED_REQUIREMENTS:
++        assert "paper" not in requirement and "sandbox" not in requirement
++
++
++def test_live_enabled_requires_exactly_the_mandated_twelve_requirements():
++    from execution.lifecycle import LIVE_ENABLED_REQUIREMENTS
++
++    assert set(LIVE_ENABLED_REQUIREMENTS) == {
++        "pinned_ed25519_owner_trust_root",
++        "owner_signed_capital_governor_profile",
++        "approved_constitutional_amendment_covering_all_three_frozen_blockers",
++        "exact_approved_build_and_config_identities",
++        "strategy_evidence_pass",
++        "owner_signed_live_authorization",
++        "verified_real_live_broker_account",
++        "verified_live_market_data",
++        "clean_reconciliation",
++        "healthy_truth_risk_capital_and_constitution_gates",
++        "no_halt",
++        "no_unresolved_order_ambiguity",
++    }
+ 
+diff --git a/tests/test_execution_layer.py b/tests/test_execution_layer.py
+--- a/tests/test_execution_layer.py
++++ b/tests/test_execution_layer.py
+@@ -750,7 +750,8 @@
+ 
+-def test_preflight_reports_exactly_the_twenty_preconditions_in_spec_order():
+-    report = make_evaluator().evaluate(intent=intent(), portfolio=portfolio(), price=100.0)
+-    assert [c["name"] for c in report.checks] == list(PRECONDITIONS)
+-    assert len(report.checks) == 20
+-
++def test_preflight_reports_exactly_the_twenty_one_preconditions_in_spec_order():
++    report = make_evaluator().evaluate(intent=intent(), portfolio=portfolio(), price=100.0)
++    assert [c["name"] for c in report.checks] == list(PRECONDITIONS)
++    assert len(report.checks) == 21
++    assert "strategy_evidence_pass" in PRECONDITIONS
++
+ 
+diff --git a/tests/test_execution_evidence.py b/tests/test_execution_evidence.py
+--- a/tests/test_execution_evidence.py
++++ b/tests/test_execution_evidence.py
+@@ -738,8 +738,8 @@ def test_readiness_is_recomputed_from_executed_evidence_each_call():
+     for check in first["engineering_checks"]:
+         assert len(check["observation_hash"]) == 64
+         assert check["produced_by"]
+-    assert first["engineering_ready"] is True
+-    assert first["failing_engineering"] == []
+-    assert first["live_status"] == "ENGINEERING_COMPLETE_STILL_LOCKED"
++    assert first["engineering_ready"] is False
++    assert "strategy_evidence_pass" in first["failing_engineering"]
++    assert first["live_status"] == "NOT_COMPLETE"
+     # Recomputed, not cached: the second call re-executes and reaches the same verdict.
+     assert second["engineering_ready"] == first["engineering_ready"]

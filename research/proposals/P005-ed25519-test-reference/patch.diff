@@ -1,0 +1,32 @@
+diff --git a/engine/execution/ed25519.py b/engine/execution/ed25519.py
+--- a/engine/execution/ed25519.py
++++ b/engine/execution/ed25519.py
+@@ -17,7 +17,8 @@ Scope, stated honestly:
+   never be used for secret-key operations inside the trading process. Verification operates on
+   public data only, so timing leakage there is not a confidentiality risk.
+ 
+-The published RFC 8032 empty-message vector is asserted by ``tests/test_ed25519.py``.
++Published RFC 8032 verification vectors, tamper cases and non-canonical-S rejection are asserted
++by ``research/tests/test_ed25519_vectors.py``.
+ """
+ 
+ from __future__ import annotations
+diff --git a/tests/test_live_readiness.py b/tests/test_live_readiness.py
+--- a/tests/test_live_readiness.py
++++ b/tests/test_live_readiness.py
+@@ -68,6 +68,15 @@
+ def test_ed25519_matches_the_published_rfc8032_vector_two():
+     private, _ = ed25519.generate_keypair(RFC8032_V2_SEED)
+     assert ed25519.sign(b"\x72", private).hex().startswith(RFC8032_V2_SIGNATURE_PREFIX)
+ 
+ 
++def test_ed25519_docstring_references_the_existing_vector_suite():
++    module_path = ROOT / "engine" / "execution" / "ed25519.py"
++    vector_path = ROOT / "research" / "tests" / "test_ed25519_vectors.py"
++    source = module_path.read_text()
++    assert vector_path.exists()
++    assert "research/tests/test_ed25519_vectors.py" in source
++    assert "tests/test_ed25519.py" not in source
++
++
+ def test_ed25519_rejects_tampering_and_malformed_input():

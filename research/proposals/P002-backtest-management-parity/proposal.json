@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "P002",
+  "title": "backtest-management-parity",
+  "patch": "patch.diff",
+  "test_commands": [
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_engine as t; t.test_backtest_break_even_and_trailing_match_frozen_cycle_management()"
+    ]
+  ]
+}

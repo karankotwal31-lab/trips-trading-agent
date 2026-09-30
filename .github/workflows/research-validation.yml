@@ -39,7 +39,9 @@ jobs:
             --journal /tmp/trips-shadow-journal.jsonl \
             --output /tmp/trips-forward-report.json
           cat /tmp/trips-forward-report.json
+      - name: Validate Class-B proposals in disposable clean-main worktrees
+        run: python research/tools/validate_proposals.py --base origin/main
       - name: Research tests
         run: python research/tests/run_research_tests.py
-      - name: PR-3 scope guard
-        run: python research/tools/check_scope.py --profile pr3
+      - name: PR-4 scope guard
+        run: python research/tools/check_scope.py --profile pr4
