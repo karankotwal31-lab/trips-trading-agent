@@ -33,7 +33,7 @@ PROFILES = {
         ),
     },
     "pr5": {
-        "prefixes": ("research/data_ingest/",),
+        "prefixes": ("research/data_ingest/", "research/results/records/"),
         "exact": (
             ".github/workflows/research-market-data.yml",
             ".github/workflows/research-validation.yml",
