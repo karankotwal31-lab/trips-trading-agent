@@ -1,0 +1,114 @@
+name: Research Historical Market Data
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "research/data_ingest/**"
+      - ".github/workflows/research-market-data.yml"
+      - ".github/workflows/research-validation.yml"
+      - "research/tools/check_scope.py"
+  workflow_dispatch:
+  schedule:
+    - cron: "35 23 * * 1-5"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  historical-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Fetch and normalize fixed-universe daily data
+        run: |
+          rm -rf /tmp/trips-evidence
+          mkdir -p /tmp/trips-evidence/daily
+          python research/data_ingest/yahoo_chart_daily.py \
+            --output-dir /tmp/trips-evidence/daily \
+            --start 1990-01-01
+      - name: Run preregistered Trend Harness
+        run: |
+          python research/trend/run.py \
+            --data-dir /tmp/trips-evidence/daily \
+            --output /tmp/trips-evidence/latest_backtest_report.json \
+            --trial-log /tmp/trips-evidence/trial_log.jsonl
+          cat /tmp/trips-evidence/latest_backtest_report.json
+      - name: Check durable Neon credential availability (presence only)
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          if [ -n "${NEON_DATABASE_URL}" ]; then
+            echo "NEON_DATABASE_URL_PRESENT=true"
+          else
+            echo "NEON_DATABASE_URL_PRESENT=false"
+          fi
+      - name: Restore previous same-branch shadow checkpoint when available
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target_branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          previous_run="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/research-market-data.yml/runs?status=success&per_page=20" \
+              --jq ".workflow_runs | map(select(.head_branch == \"${target_branch}\")) | .[0].id // empty"
+          )"
+          if [ -z "${previous_run}" ]; then
+            echo "No prior successful same-branch run; starting a new shadow chain."
+            exit 0
+          fi
+          artifact_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${previous_run}/artifacts?per_page=100" \
+              --jq '.artifacts | map(select(.name == "trips-historical-evidence" and .expired == false)) | .[0].id // empty'
+          )"
+          if [ -z "${artifact_id}" ]; then
+            echo "Prior run has no usable evidence artifact; starting a new shadow chain."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/prior-evidence.zip
+          if unzip -Z1 /tmp/prior-evidence.zip | grep -qx 'shadow/journal.jsonl'; then
+            mkdir -p /tmp/trips-evidence/shadow
+            unzip -q -o /tmp/prior-evidence.zip 'shadow/*' -d /tmp/trips-evidence
+            echo "Restored shadow checkpoint from run ${previous_run}, artifact ${artifact_id}."
+          else
+            echo "Prior artifact predates shadow state; starting a new shadow chain."
+          fi
+      - name: Initialize or advance no-order forward shadow evidence
+        run: |
+          mkdir -p /tmp/trips-evidence/shadow
+          python research/shadow/runner.py \
+            --data-dir /tmp/trips-evidence/daily \
+            --journal /tmp/trips-evidence/shadow/journal.jsonl \
+            --heartbeat /tmp/trips-evidence/shadow/heartbeat.json
+          python research/shadow/shadow_report.py \
+            --data-dir /tmp/trips-evidence/daily \
+            --journal /tmp/trips-evidence/shadow/journal.jsonl \
+            --output /tmp/trips-evidence/shadow/forward_report.json
+          cat /tmp/trips-evidence/shadow/forward_report.json
+      - name: Summarize honest verdict
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("/tmp/trips-evidence/latest_backtest_report.json")
+          r = json.loads(p.read_text())
+          assert r["verdict"] in {"EVIDENCE_PASS", "EVIDENCE_FAIL", "INSUFFICIENT_DATA"}
+          print(json.dumps({
+              "verdict": r["verdict"],
+              "report_hash": r["report_hash"],
+              "valid_asset_count": r["data"].get("valid_asset_count"),
+              "history_years": r["data"].get("history_years"),
+              "reasons": r["data"].get("reasons", []),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trips-historical-evidence
+          path: /tmp/trips-evidence
+          if-no-files-found: error
+          retention-days: 90

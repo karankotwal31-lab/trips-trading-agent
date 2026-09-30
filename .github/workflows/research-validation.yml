@@ -43,5 +43,5 @@ jobs:
         run: python research/tools/validate_proposals.py --base origin/main
       - name: Research tests
         run: python research/tests/run_research_tests.py
-      - name: PR-4 scope guard
-        run: python research/tools/check_scope.py --profile pr4
+      - name: Historical-data bootstrap scope guard
+        run: python research/tools/check_scope.py --profile pr5

@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "event": "WP1_REAL_HISTORICAL_EVIDENCE",
+  "generated_at": "2026-09-30T09:47:32.932665Z",
+  "verdict": "EVIDENCE_PASS",
+  "interpretation": "Preregistered gate passed on risk-adjusted and robustness criteria. This is historical research evidence, not a guarantee of future profitability and not production market data. Forward shadow evidence remains insufficient and no live-money authority is granted.",
+  "source": {
+    "provider": "Yahoo Finance direct chart JSON",
+    "provider_role": "research_historical_only",
+    "production_market_data": false,
+    "source_commit": "b752cb609937c63905f89bf72192cba64b26c380",
+    "workflow_run_id": 36698281872,
+    "artifact_id": 11089035942
+  },
+  "hashes": {
+    "artifact_zip_sha256": "8828ee2064642c5c5c4d786e59dc6b857210c01b364f255c97d8e6fbecd5387c",
+    "report_file_sha256": "11cf1ac62d226207b2dfdf417d0f1a3c9688a07b791107691cd2cc8b9d1112d1",
+    "report_hash": "0d3aae0dba8da1173d829f8ada0ce6ee6d7683f11cf205c5c8de6790eb3f3fb6",
+    "manifest_sha256": "3ff37bb04a3ddb76b4085e6379688f60daa07a16a5986b2e37f64896ea41f6ed",
+    "trial_log_sha256": "eb44cef1bdc8e301c70d2047b57537c5b089a66acef4fd1c5beeaa5ea81d171f"
+  },
+  "data": {
+    "valid_asset_count": 18,
+    "invalid_asset_count": 0,
+    "common_start": "2007-04-11",
+    "common_end": "2026-09-29",
+    "history_years": 19.469256726695278,
+    "required_periods_present": true
+  },
+  "strategy_2x": {
+    "cagr": 0.040674484824343216,
+    "annualized_volatility": 0.06441405187166872,
+    "sharpe": 0.6522692492060702,
+    "sortino": 0.90777869802465,
+    "max_drawdown": 0.1456901970992952,
+    "calmar": 0.2791847745021685,
+    "rolling_3y_positive_pct": 0.9635529809316921,
+    "worst_12m": -0.13421204294083344,
+    "turnover_annualized": 3.718258549815385,
+    "cost_drag_cagr": 0.004593738158986227,
+    "trade_count": 2917
+  },
+  "benchmarks": {
+    "60_40_SPY_IEF": {
+      "cagr": 0.08063684310971242,
+      "sharpe": 0.7604343414237098,
+      "max_drawdown": 0.32196911061276656,
+      "calmar": 0.2504490041179592
+    },
+    "EQUAL_WEIGHT_UNIVERSE": {
+      "cagr": 0.05672314181512084,
+      "sharpe": 0.5797050136759724,
+      "max_drawdown": 0.3340312653158678,
+      "calmar": 0.16981386985281782
+    },
+    "SPY_BUY_AND_HOLD": {
+      "cagr": 0.1096104920514529,
+      "sharpe": 0.628986655214244,
+      "max_drawdown": 0.5518944583577867,
+      "calmar": 0.1986077054979119
+    }
+  },
+  "robustness_positive_fraction_2x": 1.0,
+  "bootstrap": {
+    "block_length_trading_days": 21,
+    "replications": 1000,
+    "seed": 20260930,
+    "sharpe_5th_percentile_2x": 0.30781301094129654
+  },
+  "gate_checks": [
+    ["minimum_valid_assets", true, 18],
+    ["minimum_history_years", true, 19.469256726695278],
+    ["required_periods", true, true],
+    ["net_cagr_positive_2x", true, 0.040674484824343216],
+    ["max_drawdown_absolute", true, 0.1456901970992952],
+    ["max_drawdown_vs_spy", true, 0.1456901970992952],
+    ["net_sharpe_2x", true, 0.6522692492060702],
+    ["calmar_vs_spy", true, 0.2791847745021685],
+    ["rolling_3y_positive", true, 0.9635529809316921],
+    ["robustness_grid_positive", true, 1.0],
+    ["bootstrap_sharpe_p5", true, 0.30781301094129654]
+  ]
+}

@@ -32,6 +32,15 @@ PROFILES = {
             "research/tests/test_pr4_design.py",
         ),
     },
+    "pr5": {
+        "prefixes": ("research/data_ingest/", "research/results/records/"),
+        "exact": (
+            ".github/workflows/research-market-data.yml",
+            ".github/workflows/research-validation.yml",
+            "research/tools/check_scope.py",
+            "research/tests/test_data_ingest_contract.py",
+        ),
+    },
 }
 
 
