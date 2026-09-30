@@ -1,0 +1,66 @@
+name: Research Historical Market Data
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "research/data_ingest/**"
+      - ".github/workflows/research-market-data.yml"
+      - ".github/workflows/research-validation.yml"
+      - "research/tools/check_scope.py"
+  workflow_dispatch:
+  schedule:
+    - cron: "35 23 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  historical-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: research/data_ingest/requirements.txt
+      - name: Install research ingestion dependency
+        run: python -m pip install --disable-pip-version-check -r research/data_ingest/requirements.txt
+      - name: Fetch and normalize fixed-universe daily data
+        run: |
+          rm -rf /tmp/trips-evidence
+          mkdir -p /tmp/trips-evidence/daily
+          python research/data_ingest/yfinance_daily.py \
+            --output-dir /tmp/trips-evidence/daily \
+            --start 1990-01-01
+      - name: Run preregistered Trend Harness
+        run: |
+          python research/trend/run.py \
+            --data-dir /tmp/trips-evidence/daily \
+            --output /tmp/trips-evidence/latest_backtest_report.json \
+            --trial-log /tmp/trips-evidence/trial_log.jsonl
+          cat /tmp/trips-evidence/latest_backtest_report.json
+      - name: Summarize honest verdict
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("/tmp/trips-evidence/latest_backtest_report.json")
+          r = json.loads(p.read_text())
+          assert r["verdict"] in {"EVIDENCE_PASS", "EVIDENCE_FAIL", "INSUFFICIENT_DATA"}
+          print(json.dumps({
+              "verdict": r["verdict"],
+              "report_hash": r["report_hash"],
+              "valid_asset_count": r["data"].get("valid_asset_count"),
+              "history_years": r["data"].get("history_years"),
+              "reasons": r["data"].get("reasons", []),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trips-historical-evidence
+          path: /tmp/trips-evidence
+          if-no-files-found: error
+          retention-days: 14
