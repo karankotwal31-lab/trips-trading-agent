@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "engine"))
 
 from providers import Bar, DemoProvider
 from strategies import consensus, evaluate, features
-from risk import forge_gate, position_size
+from risk import (correlated_position_size_cap, forge_gate, position_size)
 
 
 def base_cfg():
@@ -71,6 +71,38 @@ def test_position_size_respects_risk_and_exposure():
     qty = position_size(100000, 100, 98, 0.005, 0.30, 0)
     assert qty <= 250
     assert qty * 100 <= 30000
+
+
+def test_correlated_exposure_caps_combined_position_size():
+    cfg = base_cfg()
+    assert cfg["risk"]["max_correlated_exposure_pct"] < cfg["risk"]["max_total_exposure_pct"]
+    positions = {"SPY": {"entry": 100.0, "qty": 150}}
+    cap = correlated_position_size_cap(
+        equity=100000.0, entry=100.0, config=cfg, positions=positions, symbol="QQQ")
+    assert cap == 50
+
+
+def test_correlated_exposure_gate_blocks_when_bucket_is_full():
+    cfg = base_cfg()
+    gate = forge_gate(
+        config=cfg, provider_name="x", bars_count=100, signal_score=0.9, conflict=False,
+        stale=False, positions={"SPY": {"entry": 100.0, "qty": 200}},
+        pending_entries={}, symbol="QQQ", daily_pnl=0, equity=100000,
+        drawdown_pct=0, assumed_spread_bps=5, cooldown_remaining=0, global_halt=False,
+        agreement_count=2, candle_context="BULLISH_CONTEXT")
+    failed = {x["name"] for x in gate["checks"] if not x["passed"]}
+    assert "correlated_exposure" in failed
+
+
+def test_config_guard_rejects_non_tightening_correlated_limit():
+    from config_guard import ConfigError, validate_config
+    cfg = base_cfg()
+    cfg["risk"]["max_correlated_exposure_pct"] = cfg["risk"]["max_total_exposure_pct"]
+    try:
+        validate_config(cfg)
+        assert False, "correlated cap equal to total exposure must be refused"
+    except ConfigError:
+        pass
 
 
 def test_gate_fails_conflict_live_and_global_halt():

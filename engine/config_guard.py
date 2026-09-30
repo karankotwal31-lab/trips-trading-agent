@@ -17,6 +17,7 @@ HARD_LIMITS = {
     "max_risk_per_trade_pct": 0.01,
     "max_daily_loss_pct": 0.03,
     "max_total_exposure_pct": 0.50,
+    "max_correlated_exposure_pct": 0.30,
     "max_open_positions": 5,
     "min_signal_score_floor": 0.65,
     "max_data_age_minutes": 240,
@@ -64,6 +65,26 @@ def validate_config(raw: dict) -> dict:
     _need(0 < r["max_risk_per_trade_pct"] <= HARD_LIMITS["max_risk_per_trade_pct"], "max_risk_per_trade_pct exceeds hard ceiling")
     _need(0 < r["max_daily_loss_pct"] <= HARD_LIMITS["max_daily_loss_pct"], "max_daily_loss_pct exceeds hard ceiling")
     _need(0 < r["max_total_exposure_pct"] <= HARD_LIMITS["max_total_exposure_pct"], "max_total_exposure_pct exceeds hard ceiling")
+    _need(
+        0 < r["max_correlated_exposure_pct"] <= HARD_LIMITS["max_correlated_exposure_pct"],
+        "max_correlated_exposure_pct exceeds hard ceiling")
+    _need(
+        r["max_correlated_exposure_pct"] < r["max_total_exposure_pct"],
+        "max_correlated_exposure_pct must be strictly tighter than total exposure")
+    groups = r.get("correlated_symbol_groups")
+    _need(isinstance(groups, list) and groups, "correlated_symbol_groups must be a non-empty list")
+    seen_correlated = set()
+    for group in groups:
+        _need(isinstance(group, list) and len(group) >= 2,
+              "every correlated symbol group must contain at least two symbols")
+        normalized_group = [str(symbol).strip().upper() for symbol in group]
+        _need(len(set(normalized_group)) == len(normalized_group),
+              "correlated symbol group contains duplicates")
+        _need(set(normalized_group) <= VALIDATED_SYMBOLS,
+              "correlated symbol group contains an unvalidated symbol")
+        _need(not (set(normalized_group) & seen_correlated),
+              "a symbol may belong to only one correlated exposure group")
+        seen_correlated.update(normalized_group)
     _need(1 <= int(r["max_open_positions"]) <= HARD_LIMITS["max_open_positions"], "max_open_positions exceeds hard ceiling")
     _need(HARD_LIMITS["min_signal_score_floor"] <= r["min_signal_score"] <= 0.99, "min_signal_score outside allowed range")
     _need(1 <= r["max_data_age_minutes"] <= HARD_LIMITS["max_data_age_minutes"], "max_data_age_minutes outside hard bounds")
