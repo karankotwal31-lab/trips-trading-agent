@@ -1,0 +1,46 @@
+name: Supervisor Bridge Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/supervisor_bridge/**"
+      - ".github/workflows/supervisor-bridge-validation.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "deploy/supervisor_bridge/**"
+      - ".github/workflows/supervisor-bridge-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supervisor-bridge-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Contract and adversarial tests
+        run: python -m unittest discover -s deploy/supervisor_bridge -p 'test_*.py' -v
+      - name: Assert no credentials or broker mutation surface in sidecar
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("deploy/supervisor_bridge/bridge.py").read_text()
+          forbidden = [
+              "submit_order(",
+              ".submit_order(",
+              "cancel_order(",
+              ".cancel_order(",
+              "live_authorization",
+          ]
+          hits = [x for x in forbidden if x in p]
+          if hits:
+              raise SystemExit(f"forbidden authority surface found: {hits}")
+          print("PASS: sidecar has no broker mutation/live-authorization surface")
+          PY
