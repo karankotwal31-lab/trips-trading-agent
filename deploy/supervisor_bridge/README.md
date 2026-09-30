@@ -17,7 +17,8 @@ It:
 6. only after durable storage, writes a signed acknowledgement **receipt**.
 
 It does **not** apply the receipt to runtime. It has no broker adapter, no submit/cancel method, no
-capital-release path, and no resume authority.
+capital-release path, and no resume authority. It is asynchronous and must never be placed inline
+between deterministic preflight and broker submission.
 
 A separate authoritative Trip's process may later inspect and apply a valid receipt using the
 existing Supervisor Relay acknowledgement contract.
