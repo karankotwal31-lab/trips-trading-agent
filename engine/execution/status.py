@@ -63,6 +63,7 @@ from execution import (  # noqa: E402
     owner_authority_status,
     verify_frozen_core_digest,
 )
+from execution.strategy_evidence import strategy_evidence_status  # noqa: E402
 
 
 def _approved_config() -> dict:
@@ -187,6 +188,7 @@ def build_status() -> dict:
         "constitution_contains_live_gate": "LIVE_GATE" in rule_ids,
         "frozen_config_mode": frozen_config_mode(),
         "lifecycle_stage": lifecycle.stage.value,
+        "strategy_evidence": strategy_evidence_status(),
         "live_readiness": live_readiness_report(),
         "live_readiness_by_lifecycle": lifecycle.live_readiness(),
         "live_transmission": lifecycle.may_transmit_live(),

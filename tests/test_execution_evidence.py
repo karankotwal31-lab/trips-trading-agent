@@ -738,9 +738,9 @@ def test_readiness_is_recomputed_from_executed_evidence_each_call():
     for check in first["engineering_checks"]:
         assert len(check["observation_hash"]) == 64
         assert check["produced_by"]
-    assert first["engineering_ready"] is True
-    assert first["failing_engineering"] == []
-    assert first["live_status"] == "ENGINEERING_COMPLETE_STILL_LOCKED"
+    assert first["engineering_ready"] is False
+    assert "strategy_evidence_pass" in first["failing_engineering"]
+    assert first["live_status"] == "NOT_COMPLETE"
     # Recomputed, not cached: the second call re-executes and reaches the same verdict.
     assert second["engineering_ready"] == first["engineering_ready"]
 

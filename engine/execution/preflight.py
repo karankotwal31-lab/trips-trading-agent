@@ -42,10 +42,13 @@ from .identity import authorization_drift, current_identity
 from .live_path import LivePathViolation, assert_no_forbidden_trading_environment
 from .registry import AdapterRegistry
 from .session import SessionCalendar, SessionStatus
+from .strategy_evidence import strategy_evidence_status
 
-#: The 20 deterministic preconditions. Order is the spec's order.
+
+#: The deterministic preconditions. Order is the spec's order.
 PRECONDITIONS: Tuple[str, ...] = (
     "approved_strategy_build_identity",
+    "strategy_evidence_pass",
     "approved_configuration_identity",
     "approved_risk_profile",
     "approved_capital_governor_profile",
@@ -300,6 +303,12 @@ class PreflightEvaluator:
             add("approved_strategy_build_identity", False,
                 f"executable build integrity failed: {type(exc).__name__}")
             artifacts["build_hash"] = None
+
+        strategy_evidence = strategy_evidence_status(now=now)
+        add("strategy_evidence_pass", bool(strategy_evidence["passed"]),
+            "verified" if strategy_evidence["passed"]
+            else "; ".join(strategy_evidence["reasons"][:4]))
+        artifacts["strategy_evidence"] = strategy_evidence
 
         config_ok = fingerprint_config(cfg) == self.approved_config_hash
         add("approved_configuration_identity", config_ok,
@@ -582,6 +591,7 @@ class PreflightEvaluator:
             "intent_current": bool(intent_current),
         }
         capital_release_map = {
+            "strategy_evidence_pass": bool(strategy_evidence["passed"]),
             "governor_permits": bool(governor_decision.allowed),
             "broker_state_reconciled": bool(recon_clean),
             "broker_healthy": broker_error is None and bool(getattr(health, "healthy", False)),
@@ -601,7 +611,7 @@ class PreflightEvaluator:
         self._refine(checks, "loss_drawdown_limits_not_breached",
                      f"governor daily/drawdown limits within bounds={loss_limits_ok}")
 
-        # Exactly the 20 spec preconditions, reported in spec order. Drift is a defect.
+        # Exactly the declared preconditions, reported in spec order. Drift is a defect.
         order = {name: index for index, name in enumerate(PRECONDITIONS)}
         present = {c["name"] for c in checks}
         missing = [name for name in PRECONDITIONS if name not in present]

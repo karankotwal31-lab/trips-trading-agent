@@ -86,6 +86,7 @@ LIVE_ENABLED_REQUIREMENTS: Tuple[str, ...] = (
     "owner_signed_capital_governor_profile",
     "approved_constitutional_amendment_covering_all_three_frozen_blockers",
     "exact_approved_build_and_config_identities",
+    "strategy_evidence_pass",
     "owner_signed_live_authorization",
     "verified_real_live_broker_account",
     "verified_live_market_data",
@@ -641,21 +642,24 @@ class Lifecycle:
             return {"advanced": False, "code": "PROMOTION_REFUSED_ILLEGAL_TRANSITION",
                     "stage": self._stage.value,
                     "reason": f"{self._stage.value} -> {to.value} is not a permitted transition"}
-        if actor is not Actor.OWNER:
-            if to is not Stage.LIVE_READY_LOCKED:
-                return {"advanced": False, "code": "PROMOTION_REFUSED_NOT_OWNER",
-                        "stage": self._stage.value,
-                        "reason": f"{actor.value} is not a promotion authority"}
+
+        if to is Stage.LIVE_READY_LOCKED:
             readiness = self.live_readiness()
             if not readiness["engineering_ready"]:
                 return {"advanced": False, "code": "LIVE_READY_REFUSED_ENGINEERING_INCOMPLETE",
                         "stage": self._stage.value,
                         "reason": "; ".join(readiness["failing_engineering"]),
                         "readiness": readiness}
-            self._stage = to
-            return {"advanced": True, "code": "STAGE_ADVANCED", "stage": self._stage.value,
-                    "note": "still locked: no capital release is possible from this stage",
-                    "readiness": readiness}
+            if actor is not Actor.OWNER:
+                self._stage = to
+                return {"advanced": True, "code": "STAGE_ADVANCED", "stage": self._stage.value,
+                        "note": "still locked: no capital release is possible from this stage",
+                        "readiness": readiness}
+
+        if actor is not Actor.OWNER:
+            return {"advanced": False, "code": "PROMOTION_REFUSED_NOT_OWNER",
+                    "stage": self._stage.value,
+                    "reason": f"{actor.value} is not a promotion authority"}
 
         if to is Stage.LIVE_ENABLED:
             effective_authorization = authorization or self._authorization
