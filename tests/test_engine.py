@@ -84,6 +84,45 @@ def test_gate_fails_conflict_live_and_global_halt():
     assert {"paper_mode", "strategy_conflict", "global_halt"} <= failed
 
 
+def test_backtest_break_even_and_trailing_match_frozen_cycle_management():
+    from backtest import _update_protective_stop
+    from forge_agent import apply_position_management
+
+    cfg = base_cfg()
+    bar = Bar("2026-01-01T12:00:00+00:00", 103.0, 104.5, 102.5, 104.0, 1000)
+    base = {
+        "entry": 100.0,
+        "initial_stop": 98.0,
+        "stop": 98.0,
+        "target": 110.0,
+        "qty": 1,
+        "atr_at_entry": 1.5,
+        "protected": False,
+        "trailing": False,
+    }
+
+    backtest_position = dict(base)
+    _update_protective_stop(backtest_position, bar)
+
+    cycle_position = {
+        **base,
+        "last_processed_bar_ts": None,
+    }
+    state = {
+        "positions": {"X": cycle_position},
+        "cash": 0.0,
+        "daily_pnl": 0.0,
+        "consecutive_losses": 0,
+        "cooldown_remaining": 0,
+    }
+    apply_position_management("X", bar, state, [], cfg)
+    live = state["positions"]["X"]
+
+    assert backtest_position["stop"] == live["stop"]
+    assert backtest_position["protected"] == live["protected"] is True
+    assert backtest_position["trailing"] == live["trailing"] is True
+
+
 def test_same_bar_close_cannot_retroactively_move_stop():
     from forge_agent import apply_position_management
     cfg = base_cfg()
