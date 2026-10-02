@@ -6,6 +6,8 @@ This helper has no broker or execution imports and uses only read-only Actions A
 from __future__ import annotations
 
 import argparse
+import hashlib
+from datetime import date, datetime
 import json
 import os
 from pathlib import Path
@@ -17,7 +19,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from research.shadow.journal import verify_file
+from research.shadow.journal import append_event, load_events, verify_file
+from research.data_ingest.yahoo_chart_daily import completed_us_session
 
 MAX_JOURNAL_BYTES = 32 * 1024 * 1024
 
@@ -77,6 +80,33 @@ def restore_archive(archive_path: Path, destination: Path) -> dict:
         chain = verify_file(staged)
         if not chain["valid"] or chain["count"] == 0:
             raise CheckpointError("checkpoint journal hash chain is invalid")
+        events = load_events(staged)
+        first_unclosed = None
+        for index, event in enumerate(events):
+            day_text = event.get("execution_market_date") or event.get("market_date")
+            if event.get("kind") in {"STATE", "DECISION", "HYPOTHETICAL_REBALANCE"} and day_text:
+                market_day = date.fromisoformat(day_text)
+                attempted = datetime.fromisoformat(event["attempted_at"].replace("Z", "+00:00"))
+                if not completed_us_session(market_day, attempted):
+                    first_unclosed = index
+                    break
+        if first_unclosed is not None:
+            # Keep every original event in the recovered audit trail, but do not let
+            # an unclosed session remain a STATE used by the runner/report. This is
+            # a research-data recovery, never an owner-authorization operation.
+            prefix = events[:first_unclosed]
+            if not any(e.get("kind") == "STATE" for e in prefix):
+                raise CheckpointError("no completed state before unclosed session; refusing a new chain")
+            staged.write_text("".join(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n"
+                                      for e in prefix), encoding="utf-8")
+            archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+            for original in events[first_unclosed:]:
+                append_event(staged, {"kind": "QUARANTINED_EVENT", "reason": "UNCLOSED_US_SESSION",
+                                     "original_event": original, "source_archive_sha256": archive_hash,
+                                     "execution_authority": "NONE"})
+            chain = verify_file(staged)
+            chain["quarantined_events"] = len(events) - first_unclosed
+            chain["original_last_hash"] = events[-1]["event_hash"]
         staged.replace(target)
     return chain
 
