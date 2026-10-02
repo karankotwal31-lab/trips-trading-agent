@@ -20,6 +20,7 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 HOSTS = ("https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com")
@@ -28,6 +29,18 @@ USER_AGENT = "Mozilla/5.0 (compatible; TripsResearchEvidence/1.0; +https://githu
 
 class IngestError(RuntimeError):
     pass
+
+
+def completed_us_session(day: date, observed_at: datetime) -> bool:
+    """Conservative research cutoff for the fixed US-listed ETF universe.
+
+    Wait until 17:00 New York time, including on early-close days. This is a
+    completion buffer, not proof of real-time entitlement or a market calendar.
+    """
+    if observed_at.tzinfo is None:
+        raise IngestError("observation time must be timezone-aware")
+    local = observed_at.astimezone(ZoneInfo("America/New_York"))
+    return day < local.date() or (day == local.date() and local.hour >= 17)
 
 
 def _universe(path: Path) -> list[str]:
@@ -99,7 +112,8 @@ def _request_json(url: str, *, timeout: int = 30) -> Mapping[str, object]:
     return parsed
 
 
-def _extract(symbol: str, payload: Mapping[str, object]) -> list[dict]:
+def _extract(symbol: str, payload: Mapping[str, object], *, observed_at: datetime | None = None) -> list[dict]:
+    observed_at = observed_at or datetime.now(timezone.utc)
     chart = payload.get("chart")
     if not isinstance(chart, dict):
         raise IngestError(f"{symbol}: chart object missing")
@@ -146,6 +160,8 @@ def _extract(symbol: str, payload: Mapping[str, object]) -> list[dict]:
             raise IngestError(f"{symbol}: non-numeric timestamp at index {i}")
         # Yahoo timestamps are exchange-local bar timestamps represented in UTC seconds.
         d = datetime.fromtimestamp(int(stamp) + tz_offset, tz=timezone.utc).date()
+        if not completed_us_session(d, observed_at):
+            continue
         values = {name: fields[name][i] for name in fields}
         # Yahoo sometimes emits null incomplete rows. Dropping a fully unusable row is safer than
         # inventing a value; any partial row is also excluded and the harness validates history.
@@ -227,6 +243,7 @@ def ingest(*, universe_path: Path, output_dir: Path, start: str, end: str) -> di
         "provider": "Yahoo Finance direct chart JSON",
         "provider_role": "research_historical_only",
         "production_market_data": False,
+        "session_completion_policy": "US_LISTED_ETF_AFTER_17_NEW_YORK",
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "start_requested": start,
         "end_requested_exclusive": end,

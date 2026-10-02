@@ -45,6 +45,18 @@ Missing, expired, duplicate, empty or corrupted checkpoint artifacts stop the ru
 silently resetting the evidence window. A new research branch may initialize its own chain;
 main requires an existing recoverable checkpoint.
 
+The fixed US-listed ETF universe accepts a same-day bar only after 17:00 New York time,
+with daylight-saving time handled by the IANA timezone database. Earlier dates remain usable;
+future dates are rejected. This conservative research buffer also delays early-close sessions
+until 17:00 and does not certify provider entitlement or exchange-calendar completeness.
+
+If an older verified checkpoint contains a session recorded before that cutoff, recovery
+retains the completed prefix and stores every affected suffix event intact inside
+`QUARANTINED_EVENT` audit records, including its original hash and the source archive hash.
+These records cannot count as portfolio states, decisions or rebalances. The original artifact
+is never modified. Recovery refuses if no completed portfolio state precedes the affected
+session, so it cannot invent or silently restart an evidence window.
+
 Actions artifacts remain time-limited backups, not a 24/7 durable trading host. Keep the durable
 deployment requirements in `deploy/shadow/README.md`; a passing scheduled research workflow
 does not enable order transmission or prove live readiness.
