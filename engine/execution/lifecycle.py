@@ -2,10 +2,14 @@
 
 RESEARCH -> BACKTEST -> SHADOW -> LIVE_LOCKED -> LIVE_READY_LOCKED -> LIVE_ENABLED
 
-There is no PAPER stage. Trip's is a live-money-only execution system: paper and sandbox broker
-execution are not prerequisites, are not on the path to LIVE_ENABLED, and are not represented as
-anywhere on it. A recorded fixture, mock or simulation is an engineering test and never a trading
-environment; it creates no portfolio state and satisfies no readiness requirement.
+Current enforced state: mode=paper; live transmission locked (LIVE_LOCKED / LIVE_READY_LOCKED);
+frozen Constitution rule 13 PAPER_FIRST in force. The execution layer is designed live-money-only
+with no simulated-broker stage; forward evidence comes from no-order shadow runs on real data.
+Strategy verdict: UNPROVEN.
+
+The stage machine below describes the additive execution route. A recorded fixture, mock or
+simulation is an engineering test and never a trading environment; it creates no portfolio state
+and satisfies no readiness requirement.
 
 Nothing promotes itself. Student, Evolution, Strategy, Supervisor, Guardian, broker
 connectivity and passing tests are NOT promotion authorities. LIVE_ENABLED requires an explicit

@@ -44,5 +44,6 @@ jobs:
         run: PYTHONPATH=engine python engine/evolution_engine.py
 
 # IMPORTANT: This workflow validates repository code/config on an ephemeral runner.
-# It is not the authoritative 24x7 live-state Guardian. The host-local health_daemon.py
-# must run beside a durable private runtime state backend before autonomous scheduled paper cycles resume.
+# It is not the authoritative 24x7 live-state Guardian and is not a trading scheduler.
+# Current enforced mode remains paper and live transmission remains locked; forward evidence is
+# accumulated by the separate no-order shadow runner on a durable host.

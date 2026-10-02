@@ -784,12 +784,21 @@ def test_guardian_fresh_install_does_not_create_false_prior_state_evidence():
             store.DATA=old_store; health_engine.DATA=old_health
 
 
-def test_capability_registry_does_not_claim_live_execution_or_guaranteed_profit():
+def test_capability_registry_states_locked_live_route_without_weakening_paper_first():
     registry=json.loads((ROOT/"engine"/"capability_registry.json").read_text())
-    assert registry["supported"]["execution"]=="paper-only"
+    execution=registry["supported"]["execution"].lower()
+    assert "mode=paper" in execution
+    assert "live-money-only" in execution
+    assert "locked" in execution
     text=" ".join(registry["not_supported"]).lower()
     assert "live-money" in text
     assert "guaranteed profitability" in text
+    constitution=(ROOT/"docs"/"TRIPS_CONSTITUTION.md").read_text()
+    paper_first=next(line for line in constitution.splitlines() if "**PAPER_FIRST**" in line)
+    assert "cannot submit live-money orders while this rule is in force" in paper_first
+    assert "design does not grant authority" in paper_first
+    cfg=json.loads((ROOT/"engine"/"config.json").read_text())
+    assert cfg["mode"]=="paper"
 
 
 def test_security_diagnostics_never_emit_credential_values():

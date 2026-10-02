@@ -3,7 +3,7 @@
   "project": "Trip's",
   "release": "0.6",
   "supported": {
-    "execution": "paper-only",
+    "execution": "mode=paper; additive live-money-only route present; live transmission locked",
     "instrument_scope": "US equity cash, long-only",
     "bar_interval": "60min",
     "symbols": [
@@ -29,7 +29,7 @@
     "dashboard_server": "local-only by default with CSP/security headers and GET/HEAD-only static serving"
   },
   "not_supported": [
-    "live-money order submission",
+    "live-money order submission while PAPER_FIRST/config/risk live locks remain in force",
     "options/futures/FX/crypto execution",
     "short selling",
     "unvalidated symbols",

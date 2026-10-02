@@ -938,9 +938,11 @@ def live_readiness_report(*, now: Optional[datetime] = None) -> Dict[str, Any]:
             "submits_no_order": True,
         },
         "releases_capital": False,
-        "note": ("Trip's is live-money-only. There is no paper stage, no paper endpoint and no "
-                 "paper credential. Recorded fixtures are engineering tests, not trading "
-                 "environments, and neither evidence kind releases capital."),
+        "note": ("Current enforced state: mode=paper; live transmission locked "
+                 "(LIVE_LOCKED / LIVE_READY_LOCKED); frozen Constitution rule 13 PAPER_FIRST in "
+                 "force. The execution layer is designed live-money-only with no simulated-broker "
+                 "stage; forward evidence comes from no-order shadow runs on real data. Strategy "
+                 "verdict: UNPROVEN. Recorded fixtures release no capital."),
     }
 
 
