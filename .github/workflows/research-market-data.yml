@@ -63,36 +63,12 @@ jobs:
           else
             echo "NEON_DATABASE_URL_PRESENT=false"
           fi
-      - name: Restore previous same-branch shadow checkpoint when available
+      - name: Restore verified same-branch shadow checkpoint (fail closed)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          target_branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          previous_run="$(
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/research-market-data.yml/runs?status=success&per_page=20" \
-              --jq ".workflow_runs | map(select(.head_branch == \"${target_branch}\")) | .[0].id // empty"
-          )"
-          if [ -z "${previous_run}" ]; then
-            echo "No prior successful same-branch run; starting a new shadow chain."
-            exit 0
-          fi
-          artifact_id="$(
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${previous_run}/artifacts?per_page=100" \
-              --jq '.artifacts | map(select(.name == "trips-historical-evidence" and .expired == false)) | .[0].id // empty'
-          )"
-          if [ -z "${artifact_id}" ]; then
-            echo "Prior run has no usable evidence artifact; starting a new shadow chain."
-            exit 0
-          fi
-          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/prior-evidence.zip
-          if unzip -Z1 /tmp/prior-evidence.zip | grep -qx 'shadow/journal.jsonl'; then
-            mkdir -p /tmp/trips-evidence/shadow
-            unzip -q -o /tmp/prior-evidence.zip 'shadow/*' -d /tmp/trips-evidence
-            echo "Restored shadow checkpoint from run ${previous_run}, artifact ${artifact_id}."
-          else
-            echo "Prior artifact predates shadow state; starting a new shadow chain."
-          fi
+          python research/data_ingest/restore_shadow_checkpoint.py \
+            --destination /tmp/trips-evidence/shadow
       - name: Initialize or advance no-order forward shadow evidence
         run: |
           mkdir -p /tmp/trips-evidence/shadow
