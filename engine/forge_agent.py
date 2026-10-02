@@ -13,7 +13,7 @@ from config_guard import ConfigError, fingerprint_config, validate_config
 from constitution import NON_NEGOTIABLES, constitution_gate
 from market_time import closed_bars_only
 from providers import Bar, MarketDataError, get_provider
-from risk import forge_gate, position_size
+from risk import correlated_position_size_cap, forge_gate, position_size
 from store import (StateStoreError, append_hash_chained_event, cycle_lock, read_runtime,
                    validate_state, write_json, write_runtime)
 from strategies import consensus, evaluate, features
@@ -320,9 +320,13 @@ def _execute_pending(symbol: str, bars: List[Bar], truth: dict, state: dict, led
         return exposure
     qty = position_size(state["equity"], entry, stop, cfg["risk"]["max_risk_per_trade_pct"],
                         cfg["risk"]["max_total_exposure_pct"], exposure)
-    qty = min(qty, int(state["cash"] / entry) if entry > 0 else 0)
+    correlated_cap = correlated_position_size_cap(
+        equity=state["equity"], entry=entry, config=cfg, positions=state["positions"],
+        symbol=symbol, prices=state.get("last_prices", {}))
+    qty = min(qty, correlated_cap, int(state["cash"] / entry) if entry > 0 else 0)
     if qty <= 0:
-        audit.append({"ts": now_iso(), "event": "PENDING_REJECT", "symbol": symbol, "detail": "position size resolved to zero"})
+        audit.append({"ts": now_iso(), "event": "PENDING_REJECT", "symbol": symbol,
+                      "detail": "position size resolved to zero after total/correlated/cash limits"})
         del state["pending_entries"][symbol]
         return exposure
 

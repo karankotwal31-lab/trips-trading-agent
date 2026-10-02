@@ -33,7 +33,7 @@ from config_guard import ConfigError, fingerprint_config, validate_config
 from constitution import constitution_gate
 from market_time import closed_bars_only
 from providers import Bar, MarketDataError
-from risk import forge_gate, position_size
+from risk import correlated_position_size_cap, forge_gate, position_size
 from strategies import consensus, evaluate, features
 from truth_guard import apply_cross_source_verification, cross_validate, validate_bars
 
@@ -519,8 +519,13 @@ class PreflightEvaluator:
                     float(portfolio.equity), float(price), float(stop),
                     cfg["risk"]["max_risk_per_trade_pct"], cfg["risk"]["max_total_exposure_pct"],
                     float(portfolio.exposure))
-                authorized_quantity = min(authorized_quantity,
-                                          int(float(portfolio.cash) / float(price)) if price > 0 else 0)
+                correlated_cap = correlated_position_size_cap(
+                    equity=float(portfolio.equity), entry=float(price), config=cfg,
+                    positions=dict(getattr(portfolio, "positions", {}) or {}),
+                    symbol=intent.symbol)
+                authorized_quantity = min(
+                    authorized_quantity, correlated_cap,
+                    int(float(portfolio.cash) / float(price)) if price > 0 else 0)
 
             stale = not any(x["name"] == "freshness" and x["passed"] for x in truth.get("checks", []))
             anomaly = _anomaly(truth)

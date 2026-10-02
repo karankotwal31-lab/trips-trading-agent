@@ -25,6 +25,14 @@
     "max_risk_per_trade_pct": 0.005,
     "max_daily_loss_pct": 0.015,
     "max_total_exposure_pct": 0.3,
+    "max_correlated_exposure_pct": 0.2,
+    "correlated_symbol_groups": [
+      [
+        "SPY",
+        "QQQ",
+        "AAPL"
+      ]
+    ],
     "max_open_positions": 3,
     "min_signal_score": 0.72,
     "max_data_age_minutes": 120,
