@@ -35,3 +35,16 @@ then performs the authoritative schema/history/sufficiency checks and produces
 The GitHub workflow uploads the entire normalized dataset plus the backtest report as a short-lived
 artifact. It does not commit market data or silently alter the preregistered strategy, universe,
 costs, or pass criteria.
+
+## Forward checkpoint recovery
+
+The scheduled workflow restores only the latest successful same-branch checkpoint, searching
+all API pages. Production main never restores a PR checkpoint. The helper verifies the journal
+hash chain before installing it, carries only the journal, and regenerates reports and heartbeat.
+Missing, expired, duplicate, empty or corrupted checkpoint artifacts stop the run instead of
+silently resetting the evidence window. A new research branch may initialize its own chain;
+main requires an existing recoverable checkpoint.
+
+Actions artifacts remain time-limited backups, not a 24/7 durable trading host. Keep the durable
+deployment requirements in `deploy/shadow/README.md`; a passing scheduled research workflow
+does not enable order transmission or prove live readiness.
