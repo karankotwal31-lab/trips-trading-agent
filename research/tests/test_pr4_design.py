@@ -33,7 +33,7 @@ def test_scope_roadmap_keeps_new_markets_analysis_only_until_own_evidence():
         assert token in text, token
 
 
-def test_exact_five_class_b_proposals_have_required_artifacts():
+def test_exact_six_class_b_proposals_have_required_artifacts():
     root = ROOT / "research" / "proposals"
     proposals = sorted(path for path in root.iterdir() if path.is_dir())
     ids = []
@@ -56,7 +56,7 @@ def test_exact_five_class_b_proposals_have_required_artifacts():
             "infra/core_v06.sha256",
         }
         assert not (set(targets) & forbidden), (meta["id"], targets)
-    assert ids == ["P001", "P002", "P003", "P004", "P005"]
+    assert ids == ["P001", "P002", "P003", "P004", "P005", "P006"]
 
 
 def test_proposal_commands_never_run_owner_approval():

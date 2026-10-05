@@ -1,0 +1,345 @@
+diff --git a/engine/execution/durable_store.py b/engine/execution/durable_store.py
+index cbd990f..cb5f92d 100644
+--- a/engine/execution/durable_store.py
++++ b/engine/execution/durable_store.py
+@@ -12,6 +12,7 @@ from __future__ import annotations
+ import hashlib
+ import json
+ import os
++from contextlib import contextmanager
+ from pathlib import Path
+ from typing import Any, Optional
+ 
+@@ -39,6 +40,8 @@ def _safe_path(name: str) -> Path:
+ def read_json(name: str, default: Any = None, *, strict: bool = False) -> Any:
+     path = _safe_path(name)
+     if not path.exists():
++        if strict and path.with_suffix(path.suffix + ".sha256").exists():
++            raise LedgerError(f"critical execution state missing but checksum remains: {name}")
+         return default
+     try:
+         payload = json.loads(path.read_text())
+@@ -58,6 +61,24 @@ def read_json(name: str, default: Any = None, *, strict: bool = False) -> Any:
+     return payload
+ 
+ 
++@contextmanager
++def transaction():
++    """Serialize gateway submissions on one durable local filesystem.
++
++    All workers must share ROOT_DIR; this is not a distributed database lease.
++    Unsupported platforms fail closed rather than running without a lock.
++    """
++    import fcntl
++
++    ROOT_DIR.mkdir(parents=True, exist_ok=True)
++    with (ROOT_DIR / ".gateway.lock").open("a") as handle:
++        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
++        try:
++            yield
++        finally:
++            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
++
++
+ def write_json(name: str, payload: Any) -> None:
+     path = _safe_path(name)
+     path.parent.mkdir(parents=True, exist_ok=True)
+diff --git a/engine/execution/gateway.py b/engine/execution/gateway.py
+index d7eb3f2..94b0997 100644
+--- a/engine/execution/gateway.py
++++ b/engine/execution/gateway.py
+@@ -153,6 +153,12 @@ class IdempotencyLedger:
+     def _save(self, data: Dict[str, Any]) -> None:
+         self._store.write_json(LEDGER_FILE, data)
+ 
++    def transaction(self):
++        transaction = getattr(self._store, "transaction", None)
++        if not callable(transaction):
++            raise LedgerError("execution store cannot serialize submissions")
++        return transaction()
++
+     def entry(self, idempotency_key: str) -> Optional[Dict[str, Any]]:
+         return self._load()["entries"].get(idempotency_key)
+ 
+@@ -365,6 +371,17 @@ class UniversalBrokerGateway:
+                expected_environment: Optional[str] = None,
+                now: datetime | None = None,
+                max_preflight_age_seconds: float = DEFAULT_MAX_PREFLIGHT_AGE_SECONDS) -> SubmissionResult:
++        with self._ledger.transaction():
++            return self._submit_locked(
++                intent, preflight_report=preflight_report, portfolio=portfolio,
++                holdings=holdings, expected_account_id=expected_account_id,
++                expected_environment=expected_environment, now=now,
++                max_preflight_age_seconds=max_preflight_age_seconds)
++
++    def _submit_locked(self, intent: Any, *, preflight_report: Any, portfolio: PortfolioSnapshot,
++                       holdings: Mapping[str, int] | None,
++                       expected_account_id: Optional[str], expected_environment: Optional[str],
++                       now: datetime | None, max_preflight_age_seconds: float) -> SubmissionResult:
+         now = now or datetime.now(timezone.utc)
+         holdings = dict(holdings or {})
+         cid = client_order_id_for(intent.idempotency_key)
+@@ -406,7 +423,7 @@ class UniversalBrokerGateway:
+             return result(SubmissionOutcome.INTENT_EXPIRED, ExecutionState.EXPIRED, reasons=(str(exc),))
+ 
+         # 3. Execution-layer scope and size defense in depth.
+-        violation = self._scope_violation(intent, holdings, authorized_quantity or None)
++        violation = self._scope_violation(intent, holdings, authorized_quantity)
+         if violation:
+             return result(SubmissionOutcome.REFUSED_BY_SCOPE, ExecutionState.REFUSED, reasons=(violation,))
+ 
+@@ -454,6 +471,9 @@ class UniversalBrokerGateway:
+                           reasons=(observables["reason"],))
+         release_map = dict(preflight_report.capital_release)
+         changed = []
++        if (bool(release_map.get("live_environment_verified")) and
++                (not expected_environment or observables["environment"] != expected_environment)):
++            changed.append("broker environment is missing or changed after preflight")
+         if bool(release_map.get("broker_healthy")) and not observables["healthy"]:
+             changed.append("broker health regressed after preflight")
+         if bool(release_map.get("correct_account")) and observables["account_id"] != expected_account_id:
+@@ -588,6 +608,9 @@ class UniversalBrokerGateway:
+                     "broker_order_id": broker_order_id, "reason": reason}
+         boundary = self._lifecycle.may_transmit_live()
+         permit = None
++        if not boundary["permitted"]:
++            return {"cancelled": False, "code": "LIVE_LOCKED_REFUSAL", "actor": actor,
++                    "broker_order_id": broker_order_id, "reason": reason}
+         if boundary["permitted"]:
+             try:
+                 account = self._adapter.account()
+diff --git a/engine/execution/preflight.py b/engine/execution/preflight.py
+index 45b0feb..661bc79 100644
+--- a/engine/execution/preflight.py
++++ b/engine/execution/preflight.py
+@@ -23,6 +23,7 @@ fails closed.
+ from __future__ import annotations
+ 
+ import hashlib
++import math
+ from dataclasses import dataclass, field
+ from datetime import datetime, timedelta, timezone
+ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+@@ -125,6 +126,10 @@ class HealthGateEvidence:
+         if generated.tzinfo is None:
+             return False, ("health gate generated_at must be timezone-aware",)
+         age = (now - generated).total_seconds() / 60.0
++        if not math.isfinite(self.max_age_minutes) or self.max_age_minutes <= 0:
++            reasons.append("health gate freshness limit must be finite and positive")
++        if age < 0:
++            reasons.append("health gate evidence is future-dated")
+         if age > self.max_age_minutes:
+             reasons.append(f"health gate evidence is stale ({age:.1f}m > {self.max_age_minutes}m)")
+         if not isinstance(self.checks, (list, tuple)):
+@@ -180,15 +185,19 @@ class PreflightReport:
+             reasons.append("preflight report was computed for a different intent")
+         if binding.get("symbol") != intent.symbol:
+             reasons.append(f"preflight symbol {binding.get('symbol')!r} != intent {intent.symbol!r}")
+-        if int(binding.get("quantity", -1)) != int(intent.quantity):
++        if binding.get("quantity") != int(intent.quantity):
+             reasons.append(f"preflight quantity {binding.get('quantity')} != intent {intent.quantity}")
+         try:
+             evaluated = datetime.fromisoformat(str(binding.get("evaluated_at")).replace("Z", "+00:00"))
+         except Exception:
+             reasons.append("preflight evaluation timestamp is unparseable")
+         else:
+-            age = (now - evaluated.astimezone(timezone.utc)).total_seconds()
+-            if age > max_age_seconds:
++            age = ((now - evaluated).total_seconds() if evaluated.tzinfo is not None else -1)
++            if evaluated.tzinfo is None or age < 0:
++                reasons.append("preflight timestamp must be timezone-aware and not future-dated")
++            if not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
++                reasons.append("preflight freshness limit must be finite and positive")
++            elif age > max_age_seconds:
+                 reasons.append(f"preflight report is stale ({age:.0f}s > {max_age_seconds:.0f}s)")
+         return (not reasons), tuple(reasons)
+ 
+diff --git a/engine/execution/production_runtime.py b/engine/execution/production_runtime.py
+index 7271a90..1a39d9e 100644
+--- a/engine/execution/production_runtime.py
++++ b/engine/execution/production_runtime.py
+@@ -179,7 +179,7 @@ def external_readiness_report(*, environ: Optional[Mapping[str, str]] = None,
+             "status": "NOT_VERIFIED",
+             "verified": False,
+             "dependency_status": status,
+-            "reason": f"{type(exc).__name__}: {exc}",
++            "reason": f"{type(exc).__name__}: external verification failed; inspect dependency_status",
+             "submits_orders": False,
+             "cancels_orders": False,
+             "replaces_orders": False,
+diff --git a/tests/run_all_tests.py b/tests/run_all_tests.py
+index b6f1a36..07b6173 100644
+--- a/tests/run_all_tests.py
++++ b/tests/run_all_tests.py
+@@ -24,6 +24,7 @@ from suite_integrity import SuiteIntegrityError, verify  # noqa: E402
+ 
+ #: (label, command, extra environment)
+ SUITES = (
++    ("launch-boundary", [sys.executable, "tests/test_launch_boundary_regressions.py"], {}),
+     ("engine", [sys.executable, "tests/run_tests.py"], {}),
+     ("student-engine", [sys.executable, "tests/test_student_engine.py"], {}),
+     ("student-integration", [sys.executable, "tests/test_student_integration.py"], {}),
+diff --git a/tests/suite_integrity.py b/tests/suite_integrity.py
+index 5c14a86..34538e9 100644
+--- a/tests/suite_integrity.py
++++ b/tests/suite_integrity.py
+@@ -30,6 +30,7 @@ MANIFEST = Path(__file__).resolve().parent / "approved_tests.json"
+ #: ITSELF. Pinning the gate matters as much as pinning the tests - a weakened gate makes every
+ #: assertion behind it vacuous, and the CI workflow is the gate's other entry point.
+ PINNED_FILES = (
++    "tests/test_launch_boundary_regressions.py",
+     "tests/run_tests.py",
+     "tests/run_all_tests.py",
+     "tests/suite_integrity.py",
+diff --git a/tests/test_execution_layer.py b/tests/test_execution_layer.py
+index 2317707..205c115 100644
+--- a/tests/test_execution_layer.py
++++ b/tests/test_execution_layer.py
+@@ -1570,7 +1570,9 @@ def test_safety_controller_cannot_cancel_orders_without_approved_policy():
+         assert refused["code"] == "CANCELLATION_NOT_APPROVED_BY_POLICY"
+         assert adapter.cancelled == []
+         allowed = gateway.request_cancel(broker_order_id="BO-1", reason="owner review", actor="OWNER")
+-        assert allowed["cancelled"] is True
++        assert allowed["cancelled"] is False
++        assert allowed["code"] == "LIVE_LOCKED_REFUSAL"
++        assert adapter.cancelled == []
+ 
+ 
+ def test_gateway_health_reports_automation_state_without_credentials():
+diff --git a/tests/test_launch_boundary_regressions.py b/tests/test_launch_boundary_regressions.py
+new file mode 100644
+index 0000000..8098b07
+--- /dev/null
++++ b/tests/test_launch_boundary_regressions.py
+@@ -0,0 +1,131 @@
++"""Offline launch-boundary regression tests; all broker objects are test doubles."""
++import sys
++import multiprocessing
++import unittest
++from concurrent.futures import ThreadPoolExecutor
++from dataclasses import replace
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++from unittest.mock import patch
++
++sys.path[:0] = [str(Path(__file__).resolve().parents[1] / 'engine'), str(Path(__file__).resolve().parent)]
++import test_execution_layer as b
++from execution import durable_store
++from execution.contracts import LedgerError
++from execution.production_runtime import external_readiness_report
++
++class LaunchBoundaryTests(unittest.TestCase):
++    def test_future_health_refused(self):
++        now = datetime.now(timezone.utc)
++        evidence = b.HealthGateEvidence(True, (), (now + timedelta(days=1)).isoformat())
++        self.assertFalse(evidence.is_valid(now)[0])
++
++    def test_nonfinite_health_lifetime_refused(self):
++        now = datetime.now(timezone.utc)
++        for lifetime in (float('nan'), float('inf'), 0, -1):
++            evidence = b.HealthGateEvidence(True, (), now.isoformat(), lifetime)
++            self.assertFalse(evidence.is_valid(now)[0])
++
++    def test_future_naive_and_malformed_preflight_refused(self):
++        now = datetime.now(timezone.utc)
++        order = b.intent()
++        for stamp in ((now + timedelta(days=1)).isoformat(), now.replace(tzinfo=None).isoformat(), 'invalid'):
++            report = b.permissive_report(order, now=now)
++            report.artifacts['intent_binding']['evaluated_at'] = stamp
++            self.assertFalse(report.binding_matches(order, now=now)[0])
++
++    def test_nonfinite_preflight_lifetime_refused(self):
++        now = datetime.now(timezone.utc)
++        order = b.intent()
++        for lifetime in (float('nan'), float('inf'), 0, -1):
++            self.assertFalse(b.permissive_report(order, now=now).binding_matches(order, now=now, max_age_seconds=lifetime)[0])
++
++    def test_fresh_evidence_still_valid(self):
++        now = datetime.now(timezone.utc)
++        order = b.intent()
++        self.assertTrue(b.permissive_report(order, now=now).binding_matches(order, now=now)[0])
++        self.assertTrue(b.HealthGateEvidence(True, (), now.isoformat()).is_valid(now)[0])
++
++    def test_environment_changed_refused_before_boundary(self):
++        with b.isolated_store():
++            order = b.intent()
++            gateway, adapter = b.build_gateway(adapter=b.FakeAdapter(environment='WRONG_ENV'))
++            result = b.submit(gateway, b.permissive_report(order, now=datetime.now(timezone.utc)), order=order)
++            self.assertEqual(result.outcome, 'BROKER_STATE_CHANGED')
++            self.assertEqual(adapter.submitted, [])
++
++    def test_zero_authorized_quantity_never_becomes_unlimited(self):
++        with b.isolated_store():
++            order = b.intent()
++            gateway, adapter = b.build_gateway()
++            result = b.submit(gateway, b.permissive_report(order, now=datetime.now(timezone.utc), authorized_quantity=0), order=order)
++            self.assertEqual(result.outcome, 'REFUSED_BY_SCOPE')
++            self.assertEqual(adapter.submitted, [])
++
++    def test_locked_cancel_never_reaches_adapter(self):
++        with b.isolated_store():
++            gateway, adapter = b.build_gateway()
++            result = gateway.request_cancel(broker_order_id='test', reason='test', actor='OWNER')
++            self.assertFalse(result['cancelled'])
++            self.assertEqual(adapter.cancelled, [])
++
++    def test_missing_ledger_with_checksum_is_not_fresh_state(self):
++        with b.isolated_store():
++            durable_store.write_json('intent_ledger.json', {'schema_version': 1, 'entries': {}})
++            (durable_store.ROOT_DIR / 'intent_ledger.json').unlink()
++            with self.assertRaises(LedgerError):
++                b.IdempotencyLedger().all_entries()
++
++    def test_fresh_empty_store_is_supported(self):
++        with b.isolated_store():
++            self.assertEqual(b.IdempotencyLedger().all_entries(), {})
++
++    def test_concurrent_duplicate_submits_once(self):
++        with b.owner_key_configured(), b.isolated_store():
++            order = b.intent()
++            gateway, adapter = b.build_gateway(stage=b.Stage.LIVE_ENABLED, boundary=b.ReleasingBoundary())
++            report = b.permissive_report(order, now=datetime.now(timezone.utc))
++            def run(_):
++                return b.submit(gateway, report, order=order).outcome
++            with ThreadPoolExecutor(max_workers=8) as pool:
++                outcomes = list(pool.map(run, range(16)))
++            self.assertEqual(outcomes.count('TRANSMITTED'), 1)
++            self.assertEqual(outcomes.count('DUPLICATE_SUPPRESSED'), 15)
++            self.assertEqual(len(adapter.submitted), 1)
++
++    def test_concurrent_processes_submit_once(self):
++        with b.owner_key_configured(), b.isolated_store():
++            order = b.intent()
++            gateway, adapter = b.build_gateway(stage=b.Stage.LIVE_ENABLED, boundary=b.ReleasingBoundary())
++            report = b.permissive_report(order, now=datetime.now(timezone.utc))
++            ctx = multiprocessing.get_context('fork')
++            queue = ctx.Queue()
++            start = ctx.Event()
++            def run():
++                start.wait(5)
++                queue.put(b.submit(gateway, report, order=order).outcome)
++            workers = [ctx.Process(target=run) for _ in range(4)]
++            for worker in workers:
++                worker.start()
++            start.set()
++            try:
++                outcomes = [queue.get(timeout=10) for _ in workers]
++                self.assertEqual(outcomes.count('TRANSMITTED'), 1)
++                self.assertEqual(outcomes.count('DUPLICATE_SUPPRESSED'), 3)
++            finally:
++                for worker in workers:
++                    worker.join(10)
++                    if worker.is_alive():
++                        worker.terminate()
++                        worker.join()
++                    self.assertEqual(worker.exitcode, 0)
++
++    def test_exception_text_cannot_leak_credentials(self):
++        marker = 'PRIVATE_TEST_CREDENTIAL'
++        with patch('execution.production_runtime.collect_external_readiness_artifacts', side_effect=RuntimeError(marker)):
++            report = external_readiness_report(environ={})
++        self.assertNotIn(marker, str(report))
++        self.assertFalse(report['verified'])
++
++if __name__ == '__main__':
++    unittest.main()

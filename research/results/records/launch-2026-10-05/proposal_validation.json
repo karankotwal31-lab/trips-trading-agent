@@ -1,0 +1,205 @@
+{
+  "base": "origin/main",
+  "ok": true,
+  "results": [
+    {
+      "apply_check": "PASS",
+      "commands": [
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_live_readiness as t; t.test_live_ready_locked_refuses_while_strategy_evidence_is_missing(); t.test_there_is_no_paper_stage_and_the_order_is_exactly_as_mandated(); t.test_live_enabled_requires_exactly_the_mandated_twelve_requirements()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        },
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_execution_layer as t; t.test_preflight_reports_exactly_the_twenty_one_preconditions_in_spec_order()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        },
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_execution_evidence as t; t.test_readiness_is_recomputed_from_executed_evidence_each_call()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        }
+      ],
+      "id": "P001",
+      "paths": [
+        "engine/execution/strategy_evidence.py",
+        "engine/execution/readiness.py",
+        "engine/execution/lifecycle.py",
+        "engine/execution/preflight.py",
+        "engine/execution/status.py",
+        "tests/test_live_readiness.py",
+        "tests/test_execution_layer.py",
+        "tests/test_execution_evidence.py"
+      ],
+      "targeted_tests": "PASS",
+      "title": "strategy-evidence-gate"
+    },
+    {
+      "apply_check": "PASS",
+      "commands": [
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_engine as t; t.test_backtest_break_even_and_trailing_match_frozen_cycle_management()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        }
+      ],
+      "id": "P002",
+      "paths": [
+        "engine/backtest.py",
+        "tests/test_engine.py"
+      ],
+      "targeted_tests": "PASS",
+      "title": "backtest-management-parity"
+    },
+    {
+      "apply_check": "PASS",
+      "commands": [
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_engine as t; t.test_correlated_exposure_caps_combined_position_size(); t.test_correlated_exposure_gate_blocks_when_bucket_is_full(); t.test_config_guard_rejects_non_tightening_correlated_limit()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        }
+      ],
+      "id": "P003",
+      "paths": [
+        "engine/config.json",
+        "engine/config_guard.py",
+        "engine/risk.py",
+        "engine/forge_agent.py",
+        "engine/execution/preflight.py",
+        "tests/test_engine.py"
+      ],
+      "targeted_tests": "PASS",
+      "title": "correlated-exposure-cap"
+    },
+    {
+      "apply_check": "PASS",
+      "commands": [
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_engine as t; t.test_capability_registry_states_locked_live_route_without_weakening_paper_first()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        }
+      ],
+      "id": "P004",
+      "paths": [
+        "docs/TRIPS_CONSTITUTION.md",
+        "engine/capability_registry.json",
+        "engine/execution/lifecycle.py",
+        "engine/execution/readiness.py",
+        "engine/execution/status.py",
+        ".github/workflows/trips-agent.yml",
+        ".github/workflows/trips-live-readiness.yml",
+        "tests/test_engine.py"
+      ],
+      "targeted_tests": "PASS",
+      "title": "pinned-wording-reconciliation"
+    },
+    {
+      "apply_check": "PASS",
+      "commands": [
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_live_readiness as t; t.test_ed25519_docstring_references_the_existing_vector_suite()"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": []
+        }
+      ],
+      "id": "P005",
+      "paths": [
+        "engine/execution/ed25519.py",
+        "tests/test_live_readiness.py"
+      ],
+      "targeted_tests": "PASS",
+      "title": "ed25519-test-reference"
+    },
+    {
+      "apply_check": "PASS",
+      "commands": [
+        {
+          "command": [
+            "python",
+            "tests/test_launch_boundary_regressions.py"
+          ],
+          "stderr_tail": [
+            ".............",
+            "----------------------------------------------------------------------",
+            "Ran 13 tests in 0.042s",
+            "",
+            "OK"
+          ],
+          "stdout_tail": []
+        },
+        {
+          "command": [
+            "python",
+            "tests/test_production_bootstrap.py"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": [
+            "PASS test_dependency_status_never_returns_secret_values",
+            "PASS test_dual_source_verification_passes_only_for_independent_realtime_families",
+            "PASS test_live_broker_readiness_surface_is_structurally_non_mutating",
+            "PASS test_missing_external_inputs_fail_closed_without_constructing_mutation_surface",
+            "PASS test_production_data_scope_cannot_expand_beyond_spy_qqq_aapl",
+            "PASS test_provider_without_machine_realtime_attestation_is_refused_before_fetch",
+            "PASS test_same_provider_family_is_refused_before_data_is_treated_as_independent",
+            "ALL PASS (7 production-bootstrap tests)"
+          ]
+        },
+        {
+          "command": [
+            "python",
+            "-c",
+            "import sys; sys.path[:0]=['engine','tests']; import test_execution_layer as t; [getattr(t,n)() for n in ['test_safety_controller_cannot_cancel_orders_without_approved_policy','test_duplicate_idempotency_key_is_suppressed_and_survives_restart','test_lost_response_becomes_unknown_pending_and_is_never_resubmitted','test_transmission_path_is_real_and_gated_only_by_the_frozen_boundary']]; print('PASS: four existing execution regressions')"
+          ],
+          "stderr_tail": [],
+          "stdout_tail": [
+            "PASS: four existing execution regressions"
+          ]
+        }
+      ],
+      "id": "P006",
+      "paths": [
+        "engine/execution/durable_store.py",
+        "engine/execution/gateway.py",
+        "engine/execution/preflight.py",
+        "engine/execution/production_runtime.py",
+        "tests/run_all_tests.py",
+        "tests/suite_integrity.py",
+        "tests/test_execution_layer.py",
+        "tests/test_launch_boundary_regressions.py"
+      ],
+      "targeted_tests": "PASS",
+      "title": "launch-boundary-hardening"
+    }
+  ]
+}

@@ -130,7 +130,7 @@ def main() -> int:
         path for path in PROPOSALS.iterdir()
         if path.is_dir() and path.name.startswith("P")
     )
-    expected = {"P001", "P002", "P003", "P004", "P005"}
+    expected = {"P001", "P002", "P003", "P004", "P005", "P006"}
     found = {
         json.loads((path / "proposal.json").read_text(encoding="utf-8"))["id"]
         for path in proposal_dirs

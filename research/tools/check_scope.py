@@ -44,6 +44,16 @@ PROFILES = {
 }
 
 
+# Launch audit adds one reviewed proposal and its evidence to existing research scope.
+PROFILES["pr6"] = {
+    "prefixes": PROFILES["pr5"]["prefixes"] + ("research/proposals/",),
+    "exact": PROFILES["pr5"]["exact"] + (
+        "research/tools/validate_proposals.py",
+        "research/tests/test_pr4_design.py",
+    ),
+}
+
+
 def changed_paths(base: str = "origin/main") -> list[str]:
     proc = subprocess.run(
         ["git", "diff", "--name-only", f"{base}...HEAD"],
