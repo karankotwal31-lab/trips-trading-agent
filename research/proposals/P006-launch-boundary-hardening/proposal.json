@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "P006",
+  "title": "launch-boundary-hardening",
+  "patch": "patch.diff",
+  "test_commands": [
+    [
+      "python",
+      "tests/test_launch_boundary_regressions.py"
+    ],
+    [
+      "python",
+      "tests/test_production_bootstrap.py"
+    ],
+    [
+      "python",
+      "-c",
+      "import sys; sys.path[:0]=['engine','tests']; import test_execution_layer as t; [getattr(t,n)() for n in ['test_safety_controller_cannot_cancel_orders_without_approved_policy','test_duplicate_idempotency_key_is_suppressed_and_survives_restart','test_lost_response_becomes_unknown_pending_and_is_never_resubmitted','test_transmission_path_is_real_and_gated_only_by_the_frozen_boundary']]; print('PASS: four existing execution regressions')"
+    ]
+  ]
+}

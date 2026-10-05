@@ -1,0 +1,70 @@
+{
+  "reviewed_main": "ada9fb6ee0a19f1aa2f09c1bcd2db6f2ed4597fa",
+  "as_of": "2026-10-05",
+  "launch_verdict": "NO_GO",
+  "frozen_core_verified": true,
+  "lifecycle_stage": "LIVE_LOCKED",
+  "live_transmission_permitted": false,
+  "engineering_checks": {
+    "frozen_core_digest_verified": true,
+    "executable_build_integrity": true,
+    "owner_trust_root_exercised": true,
+    "broker_channel_implementation_exercised": true,
+    "broker_specific_normalization_exercised": true,
+    "per_capability_conformance_evidence": true,
+    "recorded_evidence_is_not_live_evidence": true,
+    "live_read_only_verification_cannot_mutate": true,
+    "translation_round_trip_proven": true,
+    "reconciliation_engine_exercised": true,
+    "market_data_pipeline_exercised": true,
+    "data_health_fails_closed": true,
+    "session_calendar_exercised": true,
+    "supervisor_bridge_exercised": true
+  },
+  "safety_suites_passed": 13,
+  "research_tests_passed": 50,
+  "supervisor_tests_passed": 7,
+  "p006_new_targeted_tests_passed": 13,
+  "p006_existing_targeted_execution_tests_passed": 4,
+  "p006_production_bootstrap_tests_passed": 7,
+  "p006_applied_to_approved_build": false,
+  "local_external_readiness": {
+    "cancels_orders": false,
+    "dependency_status": {
+      "broker": {
+        "account_id_present": false,
+        "broker": null,
+        "credentials": {},
+        "supported": false
+      },
+      "market_data": {
+        "primary": {
+          "credential_present": false,
+          "note": "primary provider is not explicitly configured",
+          "provider": null,
+          "trade_eligible": false
+        },
+        "secondary": {
+          "credential_present": false,
+          "note": "secondary provider is not explicitly configured",
+          "provider": null,
+          "trade_eligible": false
+        }
+      },
+      "mutation_surface_constructed": false,
+      "releases_capital": false
+    },
+    "reason": "ProductionBootstrapError: TRIPS_LIVE_BROKER must explicitly name one of ['alpaca']",
+    "releases_capital": false,
+    "replaces_orders": false,
+    "status": "NOT_VERIFIED",
+    "submits_orders": false,
+    "verified": false
+  },
+  "latest_retrieved_research_run": 37089200665,
+  "forward_days": 4,
+  "required_forward_days": 126,
+  "forward_rebalances": 1,
+  "required_forward_rebalances": 6,
+  "real_orders_submitted_by_this_review": 0
+}
